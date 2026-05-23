@@ -33,7 +33,6 @@ services:
   - type: web
     name: rag-agent-frontend
     env: static
-    plan: free
     rootDir: "Rag agent client"
     buildCommand: npm install && npm run build
     staticPublishPath: dist
