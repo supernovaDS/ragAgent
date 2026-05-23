@@ -1,0 +1,30 @@
+# Environments
+.env
+.env.*
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.vscode/
+.idea/
+
+# Ruff
+.ruff_cache/
+
+# Local databases & Qdrant
+*.sqlite3
+app.db
+qdrant_data/
+data/
+
+# OS Files
+.DS_Store
+Thumbs.db
