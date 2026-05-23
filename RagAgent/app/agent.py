@@ -24,13 +24,13 @@ SYSTEM_PROMPT = (
 )
 
 def _extract_text_from_response(response_chunk) -> str:
-    """Safely extracts only non-thought text from a streamed response chunk."""
+    """Extracts non-thought text from a chunk."""
     texts = []
     if response_chunk.candidates:
         content = response_chunk.candidates[0].content
         if content and getattr(content, "parts", None):
             for part in content.parts:
-                # Skip thinking/reasoning parts — these leak garbage tokens
+                # skip thinking parts (they leak garbage tokens)
                 if getattr(part, 'thought', False):
                     continue
                 if part.text:
@@ -66,18 +66,16 @@ def _format_retrieved_context(results: list[dict]) -> str:
 
 def chat_with_pdf_agent(user_query: str, chat_id: str, history: list[Message] = None):
     """
-    Manages the agentic reasoning loop. Connects Flash-Lite to the tools, 
-    executes the tool call, and synthesizes the final streamed answer.
+    Main agent reasoning loop. Connects the model to tools and streams the answer.
     """
     print(f"\n[User] {user_query}")
     
-    # Generate the isolated tool instance for this specific chat
+    # get isolated tool for this chat
     search_knowledge_base = get_search_tool(chat_id, raw_query=user_query)
-    
     # 1. Initialize conversation history
     contents = []
     
-    # Append past context if it exists
+    # append history
     if history:
         for msg in history:
             contents.append(
@@ -87,8 +85,7 @@ def chat_with_pdf_agent(user_query: str, chat_id: str, history: list[Message] = 
                 )
             )
             
-    # Always search deterministically. Letting the model decide whether to call
-    # the tool is a common cause of missed evidence in RAG systems.
+    # always search deterministically to avoid missing evidence
     tool_results = search_knowledge_base(query=user_query)
     retrieved_context = _format_retrieved_context(tool_results)
 

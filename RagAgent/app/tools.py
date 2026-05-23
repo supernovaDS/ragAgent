@@ -39,7 +39,7 @@ def _embed_query(query: str) -> list[float]:
 
 
 def _scroll_chat_points(chat_id: str, limit: int) -> list[Any]:
-    """Fetch payloads for lexical search. Qdrant remains the only retrieval store."""
+    """Fetch payloads for lexical search"""
     records = []
     next_offset = None
 
@@ -260,13 +260,7 @@ def search_knowledge_base_direct(chat_id: str, query: str, raw_query: str | None
 
 def get_search_tool(chat_id: str, raw_query: str | None = None):
     def search_knowledge_base(query: str) -> list[dict]:
-        """
-        Searches the active chat's uploaded documents using hybrid retrieval.
-
-        The search combines Gemini embeddings with exact lexical matching over
-        extracted PDF text, OCR text, and image text/captions. Results include
-        page numbers and score breakdowns for grounded final answers.
-        """
+        """Search chat documents via hybrid retrieval (embeddings + lexical)."""
         return search_knowledge_base_direct(chat_id=chat_id, query=query, raw_query=raw_query)
 
     return search_knowledge_base

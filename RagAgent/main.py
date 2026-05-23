@@ -10,7 +10,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Custom HTTP Middleware to prevent browser caching on dynamic endpoints
+# prevent caching on dynamic endpoints
 @app.middleware("http")
 async def add_cache_control_headers(request: Request, call_next):
     response: Response = await call_next(request)
@@ -21,7 +21,7 @@ async def add_cache_control_headers(request: Request, call_next):
         response.headers["Expires"] = "0"
     return response
 
-# Configure CORS from environment variable
+# setup CORS
 cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
 app.add_middleware(
     CORSMiddleware,
@@ -31,12 +31,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount the API router
+# mount router
 app.include_router(api_router)
 
 @app.get("/health")
 async def health_check():
-    """Validates that the API and Vector DB are live."""
+    """Health check for API and Vector DB."""
     try:
         collection_info = db.client.get_collection(settings.QDRANT_COLLECTION_NAME)
         return {

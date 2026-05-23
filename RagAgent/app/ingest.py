@@ -12,7 +12,7 @@ from app.genai_client import client
 
 
 def get_multimodal_embedding(content: bytes | str, is_image: bool = False, mime_type: str = "image/png") -> list[float]:
-    """Generates a 3072-dimensional vector for either text or image bytes."""
+    """Generate embedding for text/image"""
     if is_image:
         part = types.Part.from_bytes(data=content, mime_type=mime_type)
         config = None
@@ -30,7 +30,7 @@ def get_multimodal_embedding(content: bytes | str, is_image: bool = False, mime_
     return response.embeddings[0].values
 
 def get_multimodal_embeddings_batch(contents_list: list[str]) -> list[list[float]]:
-    """Generates embeddings for a batch of strings."""
+    """Generate embeddings batch"""
     if not contents_list:
         return []
     
@@ -62,7 +62,7 @@ def _clean_extracted_text(text: str) -> str:
     return text.strip()
 
 def _extract_page_text(page: fitz.Page) -> str:
-    """Extract text in reading order as well as PyMuPDF can provide it."""
+    """Extract text from page"""
     try:
         text = page.get_text("text", sort=True)
     except TypeError:
@@ -74,7 +74,7 @@ def _render_page_png(page: fitz.Page, dpi: int = 180) -> bytes:
     return pix.tobytes("png")
 
 def _extract_text_from_image_bytes(image_bytes: bytes, mime_type: str, prompt: str) -> str:
-    """Use the configured Gemini generation model as OCR/caption fallback."""
+    """Fallback to Gemini for OCR/caption"""
     response = client.models.generate_content(
         model=settings.GEMINI_GENERATION_MODEL,
         contents=[
@@ -151,17 +151,11 @@ def _add_text_chunks(
         })
 
 def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> str:
-    """
-    1. Extracts text and images from the PDF using PyMuPDF.
-    2. Generates multimodal embeddings using Gemini 2.
-    3. Uploads images to Cloudinary.
-    4. Upserts the embeddings into Qdrant Cloud.
-    Returns the unique document ID.
-    """
+    """Ingest PDF: extract text/images, embed, upload to Cloudinary & Qdrant, return doc ID."""
     doc_id = str(uuid.uuid4())
     print(f"Starting ingestion for document {doc_id} (Chat: {chat_id})")
     
-    # Open the PDF from raw bytes
+    # load PDF
     pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
     
     try:
@@ -172,7 +166,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
         for page_num in range(len(pdf_document)):
             page = pdf_document.load_page(page_num)
             
-            # --- 1. Extract and Collect Text Chunks ---
+            # 1. extract text
             page_number = page_num + 1
             text_content = _extract_page_text(page)
             _add_text_chunks(
@@ -193,7 +187,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                     source="page_ocr",
                 )
                 
-            # --- 2. Extract and Embed Images ---
+            # 2. process images
             image_list = page.get_images(full=True)
             for img_index, img_info in enumerate(image_list):
                 xref = img_info[0]
@@ -203,7 +197,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                     img_ext = base_image.get("ext", "png")
                     mime_type = f"image/{img_ext}"
                     
-                    # Upload the extracted image bytes directly to Cloudinary
+                    # upload image
                     public_id = f"{doc_id}_page{page_num+1}_img{img_index}"
                     upload_result = cloudinary.uploader.upload(
                         image_bytes_data, 
@@ -246,7 +240,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                 except Exception as e:
                     print(f"Failed to process image {img_index} on page {page_num + 1}: {e}")
                 
-        # Now batch process all text chunks safely
+        # batch process text chunks
         batch_size = 100
         if text_chunks_metadata:
             print(f"Batch embedding {len(text_chunks_metadata)} text chunks...")
@@ -276,7 +270,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                         )
                     )
 
-        # Upsert all collected points to Qdrant Cloud
+        # upsert to Qdrant
         if points:
             print(f"Upserting {len(points)} vectors to Qdrant...")
             db.client.upsert(

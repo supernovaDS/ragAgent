@@ -34,7 +34,7 @@ function AuthenticatedApp() {
     }
   }, [getChats]);
 
-  // Fetch chats on mount
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -115,7 +115,7 @@ function AuthenticatedApp() {
     }
   };
 
-  // Fetch documents when active chat changes
+
   useEffect(() => {
     if (!activeChatId) return;
     let isCancelled = false;

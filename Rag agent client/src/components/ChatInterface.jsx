@@ -16,7 +16,7 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Fetch messages when chatId changes
+
   useEffect(() => {
     const controller = new AbortController();
     const fetchMessages = async () => {

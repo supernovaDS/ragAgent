@@ -7,14 +7,14 @@ from app.config import settings
 from app.models import Base
 
 # --- Supabase PostgreSQL Setup ---
-# Use the URI provided by the user in the .env file
+
 engine = create_engine(settings.SUPABASE_DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Automatically create all SQL tables in Supabase if they don't exist
+# init tables
 Base.metadata.create_all(bind=engine)
 
-# Dependency to get DB session
+# get session
 def get_db():
     db_session = SessionLocal()
     try:
@@ -36,7 +36,7 @@ class VectorDatabase:
         self._ensure_collection_exists()
 
     def _ensure_collection_exists(self):
-        """Creates the 3072-dimensional collection if it doesn't exist."""
+        """Create collection if missing."""
         if not self.client.collection_exists(self.collection_name):
             logger.info(f"Creating new Qdrant collection: {self.collection_name}")
             self.client.create_collection(
@@ -73,5 +73,5 @@ class VectorDatabase:
                 except Exception:
                     pass
 
-# Singleton instance to import into your FastAPI routes
+
 db = VectorDatabase()

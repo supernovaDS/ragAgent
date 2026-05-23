@@ -39,7 +39,7 @@ def delete_chat(chat_id: str, background_tasks: BackgroundTasks, user_id: str = 
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
         
-    # Queue all document cleanups (Cloudinary/Qdrant) to run in the background
+    # queue background cleanups
     for doc in chat.documents:
         background_tasks.add_task(_cleanup_document, doc.id)
         
@@ -48,7 +48,7 @@ def delete_chat(chat_id: str, background_tasks: BackgroundTasks, user_id: str = 
     return {"status": "success"}
 
 def _cleanup_document(doc_id: str):
-    """Internal helper to clean up Qdrant + Cloudinary for a document. Does not raise HTTPException."""
+    """Cleanup Qdrant and Cloudinary for a doc."""
     try:
         vector_db.client.delete(
             collection_name=settings.QDRANT_COLLECTION_NAME,
@@ -99,20 +99,20 @@ async def upload_document(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
     
-    # Validate file type
+    
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
     
     file_bytes = await file.read()
     
-    # Validate file size
+    
     if len(file_bytes) > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Max 50MB.")
     
-    # Run the ingestion pipeline (extracts to Qdrant & Cloudinary)
+    # run ingestion pipeline
     doc_id = ingest_pdf(file_bytes, file.filename, user_id, chat_id)
     
-    # Store the metadata in the database
+    # store metadata
     doc = Document(id=doc_id, chat_id=chat_id, filename=file.filename)
     db.add(doc)
     db.commit()
@@ -152,7 +152,7 @@ def send_message(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
         
-    # Auto-title logic if this is the very first message
+    # auto-title on first message
     if chat.title == "New Chat":
         try:
             res = client.models.generate_content(
@@ -165,15 +165,15 @@ def send_message(
         except Exception as e:
             print(f"Failed to auto-title chat: {e}")
 
-    # Get all history BEFORE adding the current message
+    # get history before adding new msg
     history = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc()).all()
 
-    # Save user message
+    
     user_msg = Message(chat_id=chat_id, role="user", text=request.query)
     db.add(user_msg)
     db.commit()
     
-    # Execute AI and Stream Response
+    
     def generate():
         full_response = ""
         try:
@@ -186,7 +186,7 @@ def send_message(
             yield error_msg
             print(f"Streaming error: {e}")
         finally:
-            # Always save whatever response we have
+            # save whatever response we got
             if full_response:
                 with SessionLocal() as stream_db:
                     assistant_msg = Message(chat_id=chat_id, role="model", text=full_response)

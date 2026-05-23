@@ -15,12 +15,10 @@ class Settings(BaseSettings):
     CLERK_JWKS_URL: str = ""
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
     
-    # Gemini Embedding 2 natively outputs 3072 dimensions. 
-    # Hardcoding it here ensures our vector DB never mismatches our embedding model.
+    # Hardcoded 3072 dims for Gemini Embedding 2
     VECTOR_DIMENSION: int = 3072 
     
-    # Retrieval/extraction knobs. These defaults favor recall: they make the app
-    # better at finding exact text that semantic search alone may miss.
+    # retrieval knobs (favor recall)
     VECTOR_SEARCH_LIMIT: int = 50
     FINAL_CONTEXT_LIMIT: int = 15
     LEXICAL_SCAN_LIMIT: int = 2500
@@ -30,7 +28,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env")
 
-# Global settings instance to import across the app
+
 settings = Settings()
 
 cloudinary.config(
