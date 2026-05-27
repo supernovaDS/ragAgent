@@ -54,11 +54,11 @@ def _format_retrieved_context(results: list[dict]) -> str:
         )
 
         content = result.get("content") or ""
+        image_url = result.get("image_url")
         if result.get("type") == "image":
-            image_url = result.get("image_url")
             content = content or "Image result with no extracted text."
-            if image_url:
-                content = f"{content}\nimage_url={image_url}"
+        if image_url:
+            content = f"{content}\nimage_url={image_url}"
 
         blocks.append(f"{header}\n{content}".strip())
 
