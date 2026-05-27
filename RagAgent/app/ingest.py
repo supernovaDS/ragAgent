@@ -35,9 +35,15 @@ def get_multimodal_embeddings_batch(contents_list: list[str]) -> list[list[float
     if not contents_list:
         return []
     
+    # Wrap each string in a separate types.Content object so Gemini generates an embedding for each document
+    wrapped_contents = [
+        types.Content(parts=[types.Part.from_text(text=text)])
+        for text in contents_list
+    ]
+    
     response = client.models.embed_content(
         model="gemini-embedding-2-preview",
-        contents=contents_list,
+        contents=wrapped_contents,
         config=types.EmbedContentConfig(
             task_type="RETRIEVAL_DOCUMENT"
         )
