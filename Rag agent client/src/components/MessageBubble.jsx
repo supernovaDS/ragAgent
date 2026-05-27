@@ -161,14 +161,32 @@ const ImageLightbox = ({ image, onClose }) => {
   );
 };
 
-const MarkdownImage = ({ src, alt, onZoom }) => {
+const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
   const [failed, setFailed] = useState(false);
+
+  // Check if the URL has a complete extension to avoid making partial requests during streaming
+  const isComplete = src && src.match(/\.(png|jpg|jpeg|webp)$/i);
+
+  // If the src changes, reset the failed state so the browser can re-attempt loading the new URL
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
 
   if (failed) {
     return (
       <div className="markdown-image-failed" title="Failed to load document image">
         <ImageOff size={16} />
         <span>Image failed to load</span>
+      </div>
+    );
+  }
+
+  // If still streaming and the URL is not yet fully typed out, show a clean loading indicator
+  if (isStreaming && !isComplete) {
+    return (
+      <div className="markdown-image-failed" style={{ borderStyle: 'solid' }}>
+        <div className="spinner" style={{ width: 14, height: 14, borderWidth: '1.5px', borderTopColor: 'var(--accent-color)' }} />
+        <span>Loading diagram...</span>
       </div>
     );
   }
@@ -185,7 +203,12 @@ const MarkdownImage = ({ src, alt, onZoom }) => {
         alt={alt || 'Document image'} 
         loading="lazy" 
         referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
+        onError={() => {
+          // Only trigger failure once the URL is complete and streaming has finished
+          if (isComplete && !isStreaming) {
+            setFailed(true);
+          }
+        }}
       />
     </button>
   );
@@ -203,7 +226,7 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
   const markdownComponents = useMemo(() => ({
     img({ src, alt }) {
       if (!src) return null;
-      return <MarkdownImage src={src} alt={alt} onZoom={setLightboxImage} />;
+      return <MarkdownImage src={src} alt={alt} onZoom={setLightboxImage} isStreaming={isStreaming} />;
     },
     a({ href, children, ...props }) {
       if (href?.startsWith('citation://')) {
@@ -220,7 +243,7 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
         </a>
       );
     },
-  }), []);
+  }), [isStreaming]);
   
   return (
     <div className={`message-row ${role}`}>
