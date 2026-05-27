@@ -39,13 +39,39 @@ def delete_chat(chat_id: str, background_tasks: BackgroundTasks, user_id: str = 
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
         
-    # queue background cleanups
-    for doc in chat.documents:
-        background_tasks.add_task(_cleanup_document, doc.id)
+    doc_ids = [doc.id for doc in chat.documents]
+    background_tasks.add_task(_cleanup_chat, chat_id, doc_ids)
         
     db.delete(chat)
     db.commit()
     return {"status": "success"}
+
+def _cleanup_cloudinary_images(doc_id: str):
+    """Delete all page images uploaded to Cloudinary for a document."""
+    try:
+        cloudinary.api.delete_resources_by_prefix(f"{doc_id}_")
+    except Exception as e:
+        print(f"Failed to delete images for doc {doc_id}: {e}")
+
+def _cleanup_chat(chat_id: str, doc_ids: List[str]):
+    """Cleanup Qdrant and Cloudinary for a chat."""
+    try:
+        vector_db.client.delete(
+            collection_name=settings.QDRANT_COLLECTION_NAME,
+            points_selector=qdrant_client.models.Filter(
+                must=[
+                    qdrant_client.models.FieldCondition(
+                        key="chat_id",
+                        match=qdrant_client.models.MatchValue(value=chat_id)
+                    )
+                ]
+            )
+        )
+    except Exception as e:
+        print(f"Failed to delete vectors for chat {chat_id}: {e}")
+        
+    for doc_id in doc_ids:
+        _cleanup_cloudinary_images(doc_id)
 
 def _cleanup_document(doc_id: str):
     """Cleanup Qdrant and Cloudinary for a doc."""
@@ -62,12 +88,9 @@ def _cleanup_document(doc_id: str):
             )
         )
     except Exception as e:
-        print(f"Failed to delete vectors: {e}")
+        print(f"Failed to delete vectors for doc {doc_id}: {e}")
         
-    try:
-        cloudinary.api.delete_resources_by_prefix(f"{doc_id}_")
-    except Exception as e:
-        print(f"Failed to delete images: {e}")
+    _cleanup_cloudinary_images(doc_id)
 
 @router.get("/chats/{chat_id}/documents", response_model=List[DocumentSchema])
 def get_documents(chat_id: str, user_id: str = Depends(get_current_user), db: Session = Depends(get_db)):

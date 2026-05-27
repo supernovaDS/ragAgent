@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import qdrant_client
 from qdrant_client.models import VectorParams, Distance
@@ -13,6 +13,14 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # init tables
 Base.metadata.create_all(bind=engine)
+
+# Ensure indexes exist on foreign keys for fast deletes
+try:
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_documents_chat_id ON documents (chat_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages (chat_id)"))
+except Exception as e:
+    logging.getLogger(__name__).warning(f"Could not create database indexes: {e}")
 
 # get session
 def get_db():

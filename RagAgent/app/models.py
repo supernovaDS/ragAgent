@@ -23,7 +23,7 @@ class Document(Base):
     __tablename__ = "documents"
     
     id = Column(String, primary_key=True, default=generate_uuid)
-    chat_id = Column(String, ForeignKey("chats.id", ondelete="CASCADE"), nullable=False)
+    chat_id = Column(String, ForeignKey("chats.id", ondelete="CASCADE"), nullable=False, index=True)
     filename = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     
@@ -33,7 +33,7 @@ class Message(Base):
     __tablename__ = "messages"
     
     id = Column(String, primary_key=True, default=generate_uuid)
-    chat_id = Column(String, ForeignKey("chats.id", ondelete="CASCADE"), nullable=False)
+    chat_id = Column(String, ForeignKey("chats.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False)  # 'user' or 'model'
     text = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

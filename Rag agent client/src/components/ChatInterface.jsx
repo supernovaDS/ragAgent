@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { useAuth } from "@clerk/clerk-react";
+import { useUser } from "@clerk/clerk-react";
 import MessageBubble from './MessageBubble';
-import API_BASE from '../api';
+import useAuthFetch from '../hooks/useAuthFetch';
 
 const ChatInterface = ({ chatId, onTitleUpdate }) => {
   const [messages, setMessages] = useState([]);
@@ -10,7 +10,9 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
   const [streamingMessage, setStreamingMessage] = useState('');
   const [isFetching, setIsFetching] = useState(false);
   const messagesEndRef = useRef(null);
-  const { getToken } = useAuth();
+  const authFetch = useAuthFetch();
+  const { user } = useUser();
+  const userId = user?.id;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -20,17 +22,29 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
   useEffect(() => {
     const controller = new AbortController();
     const fetchMessages = async () => {
-      setMessages([]);
-      setIsFetching(true);
+      let hasCache = false;
+      if (userId && chatId && !chatId.toString().startsWith('temp_')) {
+        try {
+          const cached = localStorage.getItem(`rag_messages_${userId}_${chatId}`);
+          if (cached) {
+            setMessages(JSON.parse(cached));
+            hasCache = true;
+          } else {
+            setMessages([]);
+          }
+        } catch (e) {
+          console.error("Failed to load cached messages:", e);
+        }
+      } else {
+        setMessages([]);
+      }
+
+      setIsFetching(!hasCache);
       try {
-        const token = await getToken();
-        const res = await fetch(`${API_BASE}/api/chats/${chatId}/messages`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const freshMessages = await authFetch(`/api/chats/${chatId}/messages`, {
           signal: controller.signal
         });
-        if (res.ok) {
-          setMessages(await res.json());
-        }
+        setMessages(freshMessages);
       } catch (error) {
         if (error.name !== 'AbortError') {
           console.error("Failed to fetch messages:", error);
@@ -40,10 +54,61 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
       }
     };
     if (chatId) {
-      fetchMessages();
+      if (chatId.toString().startsWith('temp_')) {
+        setMessages([]);
+        setIsFetching(false);
+      } else {
+        fetchMessages();
+      }
     }
     return () => controller.abort();
-  }, [chatId, getToken]);
+  }, [chatId, authFetch, userId]);
+
+  // Sync messages to cache once loading/streaming are complete
+  useEffect(() => {
+    if (!userId || !chatId || chatId.toString().startsWith('temp_') || isLoading || streamingMessage) return;
+    try {
+      if (messages.length > 0) {
+        localStorage.setItem(`rag_messages_${userId}_${chatId}`, JSON.stringify(messages));
+        
+        const metaKey = `rag_cached_chats_metadata_${userId}`;
+        let cachedList = [];
+        try {
+          const cachedListStr = localStorage.getItem(metaKey);
+          if (cachedListStr) {
+            cachedList = JSON.parse(cachedListStr);
+          }
+        } catch (e) {
+          console.error("Failed to parse cached chats metadata list:", e);
+        }
+        
+        cachedList = cachedList.filter(id => id !== chatId);
+        cachedList.push(chatId);
+        
+        const LIMIT = 10;
+        while (cachedList.length > LIMIT) {
+          const evictedId = cachedList.shift();
+          localStorage.removeItem(`rag_messages_${userId}_${evictedId}`);
+        }
+        
+        localStorage.setItem(metaKey, JSON.stringify(cachedList));
+      } else {
+        localStorage.removeItem(`rag_messages_${userId}_${chatId}`);
+        const metaKey = `rag_cached_chats_metadata_${userId}`;
+        try {
+          const cachedListStr = localStorage.getItem(metaKey);
+          if (cachedListStr) {
+            const cachedList = JSON.parse(cachedListStr).filter(id => id !== chatId);
+            localStorage.setItem(metaKey, JSON.stringify(cachedList));
+          }
+        } catch (e) {
+          console.error("Failed to parse cached chats metadata list:", e);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to cache messages:", e);
+    }
+  }, [messages, userId, chatId, isLoading, streamingMessage]);
 
   useEffect(() => {
     scrollToBottom();
@@ -62,21 +127,10 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
     setStreamingMessage('');
 
     try {
-      const token = await getToken();
-      const response = await fetch(`${API_BASE}/api/chats/${chatId}/message`, {
+      const response = await authFetch(`/api/chats/${chatId}/message`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ query })
       });
-
-      if (!response.ok) {
-        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'model', text: `**Error:** Failed to fetch` }]);
-        setIsLoading(false);
-        return;
-      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -150,14 +204,14 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
         <form className="input-box" onSubmit={handleSubmit}>
           <textarea
             className="chat-input"
-            placeholder="Message RagAgent..."
+            placeholder={chatId.toString().startsWith('temp_') ? "Creating chat..." : "Message RagAgent..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isLoading}
+            disabled={isLoading || chatId.toString().startsWith('temp_')}
             rows={1}
           />
-          <button className="send-button" type="submit" disabled={!inputValue.trim() || isLoading}>
+          <button className="send-button" type="submit" disabled={!inputValue.trim() || isLoading || chatId.toString().startsWith('temp_')}>
             Send
           </button>
         </form>

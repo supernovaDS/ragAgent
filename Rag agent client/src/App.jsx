@@ -1,23 +1,72 @@
 import { useState, useEffect, useCallback } from 'react';
-import { SignedIn, SignedOut, SignIn, UserButton, useAuth } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn, UserButton, useUser } from "@clerk/clerk-react";
 import FileUpload from './components/FileUpload';
 import ChatInterface from './components/ChatInterface';
 import { PlusCircle, MessageSquare, Trash2 } from 'lucide-react';
-import API_BASE from './api';
+import useAuthFetch from './hooks/useAuthFetch';
 
 function AuthenticatedApp() {
-  const { getToken } = useAuth();
+  const authFetch = useAuthFetch();
+  const { user } = useUser();
+  const userId = user?.id;
+
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [documents, setDocuments] = useState([]);
 
+  // Load from localStorage cache once userId is available
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      const cachedChats = localStorage.getItem(`rag_chats_${userId}`);
+      if (cachedChats) {
+        const parsedChats = JSON.parse(cachedChats);
+        setChats(parsedChats);
+        
+        const cachedActiveId = localStorage.getItem(`rag_active_chat_${userId}`);
+        if (cachedActiveId && parsedChats.some(c => c.id === cachedActiveId)) {
+          setActiveChatId(cachedActiveId);
+        } else if (parsedChats.length > 0) {
+          setActiveChatId(parsedChats[0].id);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load cached chats:", e);
+    }
+  }, [userId]);
+
+  // Sync chats to localStorage
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      if (chats.length > 0) {
+        const chatsToCache = chats.filter(c => !c.id.toString().startsWith('temp_'));
+        localStorage.setItem(`rag_chats_${userId}`, JSON.stringify(chatsToCache));
+      } else {
+        localStorage.removeItem(`rag_chats_${userId}`);
+      }
+    } catch (e) {
+      console.error("Failed to cache chats:", e);
+    }
+  }, [chats, userId]);
+
+  // Sync activeChatId to localStorage
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      if (activeChatId && !activeChatId.toString().startsWith('temp_')) {
+        localStorage.setItem(`rag_active_chat_${userId}`, activeChatId);
+      } else if (!activeChatId) {
+        localStorage.removeItem(`rag_active_chat_${userId}`);
+      }
+    } catch (e) {
+      console.error("Failed to cache active chat ID:", e);
+    }
+  }, [activeChatId, userId]);
+
   const getChats = useCallback(async () => {
-    const token = await getToken();
-    const res = await fetch(`${API_BASE}/api/chats`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    return res.ok ? res.json() : null;
-  }, [getToken]);
+    return authFetch('/api/chats');
+  }, [authFetch]);
 
   const fetchChats = useCallback(async () => {
     try {
@@ -33,7 +82,6 @@ function AuthenticatedApp() {
       console.error("Failed to fetch chats:", error);
     }
   }, [getChats]);
-
 
   useEffect(() => {
     let isCancelled = false;
@@ -61,12 +109,8 @@ function AuthenticatedApp() {
   }, [getChats]);
 
   const getDocuments = useCallback(async (chatId) => {
-    const token = await getToken();
-    const res = await fetch(`${API_BASE}/api/chats/${chatId}/documents`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    return res.ok ? res.json() : null;
-  }, [getToken]);
+    return authFetch(`/api/chats/${chatId}/documents`);
+  }, [authFetch]);
 
   const fetchDocuments = useCallback(async (chatId) => {
     try {
@@ -78,43 +122,70 @@ function AuthenticatedApp() {
   }, [getDocuments]);
 
   const createNewChat = async () => {
+    const tempId = `temp_${crypto.randomUUID()}`;
+    const placeholderChat = {
+      id: tempId,
+      title: "New Chat",
+      created_at: new Date().toISOString()
+    };
+
+    setChats(prev => [placeholderChat, ...prev]);
+    setActiveChatId(tempId);
+
     try {
-      const token = await getToken();
-      const res = await fetch(`${API_BASE}/api/chats`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const newChat = await res.json();
-        setChats(prev => [newChat, ...prev]);
-        setActiveChatId(newChat.id);
-      }
+      const newChat = await authFetch('/api/chats', { method: 'POST' });
+      setChats(prev => prev.map(c => c.id === tempId ? newChat : c));
+      setActiveChatId(currentId => currentId === tempId ? newChat.id : currentId);
     } catch (error) {
       console.error("Failed to create chat:", error);
+      setChats(prev => prev.filter(c => c.id !== tempId));
+      setActiveChatId(currentId => currentId === tempId ? null : currentId);
+      alert("Failed to create new chat. Please try again.");
     }
   };
 
   const deleteChat = async (e, chatId) => {
     e.stopPropagation();
     if (!window.confirm("Delete this chat and all its PDFs?")) return;
+    
+    const originalChats = [...chats];
+    const originalActiveChatId = activeChatId;
+    const originalDocuments = [...documents];
+
+    const updatedChats = chats.filter(chat => chat.id !== chatId);
+    setChats(updatedChats);
+
+    if (activeChatId === chatId) {
+      const nextActiveId = updatedChats[0]?.id ?? null;
+      setActiveChatId(nextActiveId);
+      setDocuments([]);
+    }
+
     try {
-      const token = await getToken();
-      const res = await fetch(`${API_BASE}/api/chats/${chatId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        if (activeChatId === chatId) {
-          setActiveChatId(null);
-          setDocuments([]);
+      await authFetch(`/api/chats/${chatId}`, { method: 'DELETE' });
+
+      // Clean up local cache for this chat on success
+      if (userId) {
+        try {
+          localStorage.removeItem(`rag_messages_${userId}_${chatId}`);
+          const metaKey = `rag_cached_chats_metadata_${userId}`;
+          const cachedListStr = localStorage.getItem(metaKey);
+          if (cachedListStr) {
+            const cachedList = JSON.parse(cachedListStr).filter(id => id !== chatId);
+            localStorage.setItem(metaKey, JSON.stringify(cachedList));
+          }
+        } catch (cacheErr) {
+          console.error("Failed to prune metadata for deleted chat:", cacheErr);
         }
-        fetchChats();
       }
     } catch (error) {
       console.error("Failed to delete chat:", error);
+      setChats(originalChats);
+      setActiveChatId(originalActiveChatId);
+      setDocuments(originalDocuments);
+      alert("Failed to delete chat. Please try again.");
     }
   };
-
 
   useEffect(() => {
     if (!activeChatId) return;
@@ -129,7 +200,11 @@ function AuthenticatedApp() {
       }
     };
 
-    loadDocuments();
+    if (activeChatId.toString().startsWith('temp_')) {
+      setDocuments([]);
+    } else {
+      loadDocuments();
+    }
 
     return () => {
       isCancelled = true;
@@ -138,17 +213,16 @@ function AuthenticatedApp() {
 
   const deleteDocument = async (docId) => {
     if (!window.confirm("Delete this PDF from the knowledge base?")) return;
+    
+    const originalDocuments = [...documents];
+    setDocuments(prev => prev.filter(d => d.id !== docId));
+
     try {
-      const token = await getToken();
-      const res = await fetch(`${API_BASE}/api/documents/${docId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setDocuments(prev => prev.filter(d => d.id !== docId));
-      }
+      await authFetch(`/api/documents/${docId}`, { method: 'DELETE' });
     } catch (error) {
       console.error("Failed to delete document:", error);
+      setDocuments(originalDocuments);
+      alert("Failed to delete document. Please try again.");
     }
   };
 

@@ -1,13 +1,12 @@
 import { useState, useRef } from 'react';
-import { useAuth } from "@clerk/clerk-react";
-import API_BASE from '../api';
+import useAuthFetch from '../hooks/useAuthFetch';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 const FileUpload = ({ chatId, onUploadComplete }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState('');
-  const { getToken } = useAuth();
+  const authFetch = useAuthFetch();
   const fileInputRef = useRef(null);
 
   const handleFileUpload = async (event) => {
@@ -31,34 +30,39 @@ const FileUpload = ({ chatId, onUploadComplete }) => {
     formData.append('file', file);
 
     try {
-      const token = await getToken();
-      const response = await fetch(`${API_BASE}/api/chats/${chatId}/upload`, {
+      await authFetch(`/api/chats/${chatId}/upload`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         body: formData,
       });
 
-      if (response.ok) {
-        setMessage('');
-        onUploadComplete();
-      } else {
-        const data = await response.json();
-        setMessage(`Error: ${data.detail || 'Upload failed'}`);
-      }
+      setMessage('');
+      onUploadComplete();
     } catch (error) {
       console.error(error);
-      setMessage('Network error.');
+      setMessage(error.message || 'Upload failed.');
     } finally {
       setIsUploading(false);
       event.target.value = null;
     }
   };
 
+  const handleUploadClick = () => {
+    if (chatId && chatId.toString().startsWith('temp_')) {
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
   return (
     <>
-      <div className="upload-zone" onClick={() => fileInputRef.current?.click()}>
+      <div 
+        className="upload-zone" 
+        onClick={handleUploadClick}
+        style={{
+          opacity: chatId && chatId.toString().startsWith('temp_') ? 0.5 : 1,
+          cursor: chatId && chatId.toString().startsWith('temp_') ? 'not-allowed' : 'pointer'
+        }}
+      >
         <input 
           type="file" 
           ref={fileInputRef}
