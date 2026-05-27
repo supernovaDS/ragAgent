@@ -8,3 +8,6 @@ Thumbs.db
 
 # Local configuration
 .gemini/
+
+# Developer Docs
+developer.md
