@@ -15,6 +15,7 @@ from app.agent import chat_with_pdf_agent
 from app.tools import search_knowledge_base_direct
 from app.config import settings
 from app.genai_client import client
+from app.utils import call_with_retry
 
 router = APIRouter(prefix="/api")
 
@@ -178,7 +179,8 @@ def send_message(
     # auto-title on first message
     if chat.title == "New Chat":
         try:
-            res = client.models.generate_content(
+            res = call_with_retry(
+                client.models.generate_content,
                 model=settings.GEMINI_GENERATION_MODEL,
                 contents=f"Generate a 3-word title for a conversation that begins with: '{request.query}'",
                 config=types.GenerateContentConfig(system_instruction="Only return the 3 words, nothing else.")

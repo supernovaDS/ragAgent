@@ -10,6 +10,7 @@ from qdrant_client.models import PointStruct
 from app.config import settings
 from app.database import db
 from app.genai_client import client
+from app.utils import call_with_retry
 
 
 def get_multimodal_embedding(content: bytes | str, is_image: bool = False, mime_type: str = "image/png") -> list[float]:
@@ -23,7 +24,8 @@ def get_multimodal_embedding(content: bytes | str, is_image: bool = False, mime_
             task_type="RETRIEVAL_DOCUMENT"
         )
 
-    response = client.models.embed_content(
+    response = call_with_retry(
+        client.models.embed_content,
         model="gemini-embedding-2-preview",
         contents=part,
         config=config
@@ -41,7 +43,8 @@ def get_multimodal_embeddings_batch(contents_list: list[str]) -> list[list[float
         for text in contents_list
     ]
     
-    response = client.models.embed_content(
+    response = call_with_retry(
+        client.models.embed_content,
         model="gemini-embedding-2-preview",
         contents=wrapped_contents,
         config=types.EmbedContentConfig(
@@ -82,7 +85,8 @@ def _render_page_png(page: fitz.Page, dpi: int = 180) -> bytes:
 
 def _extract_text_from_image_bytes(image_bytes: bytes, mime_type: str, prompt: str) -> str:
     """Fallback to Gemini for OCR/caption"""
-    response = client.models.generate_content(
+    response = call_with_retry(
+        client.models.generate_content,
         model=settings.GEMINI_GENERATION_MODEL,
         contents=[
             types.Content(
