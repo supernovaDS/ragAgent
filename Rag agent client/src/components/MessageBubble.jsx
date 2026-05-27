@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, ImageOff } from 'lucide-react';
 
 const EVIDENCE_LINE_RE = /^\[Evidence\s+(\d+)\]\s+filename=(.*?);\s*page=(.*?);\s*source=(.*?);\s*relevance=([^\n]+)$/gim;
 const PAGE_CITATION_RE = /\[(?:p\.?|page)\s*(\d+)(?:\s*[-,]\s*\d+)?\]/gi;
@@ -161,10 +161,40 @@ const ImageLightbox = ({ image, onClose }) => {
   );
 };
 
+const MarkdownImage = ({ src, alt, onZoom }) => {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div className="markdown-image-failed" title="Failed to load document image">
+        <ImageOff size={16} />
+        <span>Image failed to load</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="markdown-image-button"
+      onClick={() => onZoom({ src, alt })}
+      aria-label="Open document image preview"
+    >
+      <img 
+        src={src} 
+        alt={alt || 'Document image'} 
+        loading="lazy" 
+        onError={() => setFailed(true)}
+      />
+    </button>
+  );
+};
+
 const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = null }) => {
   const isUser = role === 'user';
   const visibleText = useSmoothStreamingText(text || '', isStreaming);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
 
   const citations = useMemo(() => parseEvidence(visibleText), [visibleText]);
   const markdownText = useMemo(() => prepareMarkdown(visibleText), [visibleText]);
@@ -172,17 +202,7 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
   const markdownComponents = useMemo(() => ({
     img({ src, alt }) {
       if (!src) return null;
-
-      return (
-        <button
-          type="button"
-          className="markdown-image-button"
-          onClick={() => setLightboxImage({ src, alt })}
-          aria-label="Open document image preview"
-        >
-          <img src={src} alt={alt || 'Document image'} loading="lazy" />
-        </button>
-      );
+      return <MarkdownImage src={src} alt={alt} onZoom={setLightboxImage} />;
     },
     a({ href, children, ...props }) {
       if (href?.startsWith('citation://')) {
@@ -204,9 +224,16 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
   return (
     <div className={`message-row ${role}`}>
       <div className="message-content">
-        <div className={`avatar ${isUser ? (userImageUrl ? 'user' : 'user-icon') : 'model'}`}>
+        <div className={`avatar ${isUser ? ((userImageUrl && !avatarFailed) ? 'user' : 'user-icon') : 'model'}`}>
           {isUser ? (
-            userImageUrl ? <img src={userImageUrl} alt="User" referrerPolicy="no-referrer" /> : 'U'
+            (userImageUrl && !avatarFailed) ? (
+              <img 
+                src={userImageUrl} 
+                alt="User" 
+                referrerPolicy="no-referrer" 
+                onError={() => setAvatarFailed(true)}
+              />
+            ) : 'U'
           ) : (
             <Sparkles />
           )}

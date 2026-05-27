@@ -490,6 +490,22 @@ body {
   height: auto;
 }
 
+.markdown-image-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 0.6rem;
+  background-color: var(--bot-msg-bg);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  max-width: 24rem;
+  margin: 0.85rem 0;
+  gap: 0.5rem;
+}
+
 /* Input Area - Sleek, centered layout */
 .input-container {
   position: absolute;
