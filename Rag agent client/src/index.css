@@ -472,6 +472,7 @@ body {
 .markdown-image-button {
   appearance: none;
   display: block;
+  width: 100%;
   max-width: min(100%, 36rem);
   margin: 0.85rem 0;
   padding: 0;
