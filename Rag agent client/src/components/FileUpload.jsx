@@ -71,22 +71,15 @@ const FileUpload = ({ chatId, onUploadComplete }) => {
           onChange={handleFileUpload}
         />
         <span>+ Upload PDF</span>
-        {message && <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--error-color, #ff4a4a)' }}>{message}</div>}
+        {message && <div className="upload-error">{message}</div>}
       </div>
       
 
       {isUploading && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
-          backgroundColor: 'rgba(15, 15, 15, 0.85)', 
-          zIndex: 9999, display: 'flex', flexDirection: 'column', 
-          alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(3px)',
-          color: '#ffffff'
-        }}>
+        <div className="upload-overlay">
           <div className="spinner" />
-          <div style={{ marginTop: '1rem', fontWeight: 600 }}>Extracting Text & Uploading Images...</div>
-          <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: 'rgba(255, 255, 255, 0.7)' }}>This takes about 5-10 seconds per page.</div>
+          <div className="upload-overlay-text">Extracting Text & Uploading Images...</div>
+          <div className="upload-overlay-subtext">This takes about 5-10 seconds per page.</div>
         </div>
       )}
     </>

@@ -176,24 +176,29 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
     <div className="main-chat">
       <div className="messages-container">
         {isFetching ? (
-          <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <div className="chat-empty-state">
              <p>Loading chat history...</p>
           </div>
         ) : messages.length === 0 && !streamingMessage && !isLoading ? (
-          <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <div className="chat-empty-state">
             <h2>RagAgent Chat</h2>
-            <p style={{ marginTop: '1rem' }}>Ask me anything about your uploaded knowledge base!</p>
+            <p>Ask me anything about your uploaded knowledge base!</p>
           </div>
         ) : (
           <>
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} role={msg.role} text={msg.text} />
+              <MessageBubble 
+                key={msg.id} 
+                role={msg.role} 
+                text={msg.text} 
+                userImageUrl={user?.imageUrl} 
+              />
             ))}
             {isLoading && (
-              <MessageBubble role="model" text="*Thinking...*" />
+              <MessageBubble role="model" text="*Thinking...*" userImageUrl={user?.imageUrl} />
             )}
             {streamingMessage && (
-              <MessageBubble role="model" text={streamingMessage} isStreaming />
+              <MessageBubble role="model" text={streamingMessage} isStreaming userImageUrl={user?.imageUrl} />
             )}
           </>
         )}

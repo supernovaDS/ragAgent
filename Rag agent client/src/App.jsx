@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { SignedIn, SignedOut, SignIn, UserButton, useUser } from "@clerk/clerk-react";
 import FileUpload from './components/FileUpload';
 import ChatInterface from './components/ChatInterface';
-import { PlusCircle, MessageSquare, Trash2 } from 'lucide-react';
+import { PlusCircle, MessageSquare, Trash2, Sun, Moon } from 'lucide-react';
 import useAuthFetch from './hooks/useAuthFetch';
 
-function AuthenticatedApp() {
+function AuthenticatedApp({ theme, onToggleTheme }) {
   const authFetch = useAuthFetch();
   const { user } = useUser();
   const userId = user?.id;
@@ -228,44 +228,57 @@ function AuthenticatedApp() {
 
   return (
     <div className="app-container">
-      <div className="sidebar" style={{ overflow: 'hidden' }}>
-        <div className="sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div className="sidebar-title" style={{ margin: 0 }}>RagAgent</div>
-          <UserButton />
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-title">RagAgent</div>
+          <div className="sidebar-header-right">
+            <button 
+              onClick={onToggleTheme} 
+              className="theme-toggle-btn"
+              title={theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            <UserButton />
+          </div>
         </div>
         
         <button 
           onClick={createNewChat}
-          style={{ width: '100%', padding: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: '1px solid var(--border-color)', borderRadius: '0.5rem', cursor: 'pointer', marginBottom: '1rem', color: 'var(--text-main)' }}
+          className="sidebar-action-btn"
         >
           <PlusCircle size={18} /> New Chat
         </button>
 
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Your Chats</div>
+        <div className="chat-list-container">
+          <div className="sidebar-section-title">Your Chats</div>
           {chats.map(chat => (
             <div 
               key={chat.id} 
               onClick={() => setActiveChatId(chat.id)}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 0.5rem', cursor: 'pointer', borderRadius: '0.5rem', background: activeChatId === chat.id ? 'var(--border-color)' : 'transparent' }}
+              className={`chat-list-item ${activeChatId === chat.id ? 'active' : ''}`}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
+              <div className="chat-item-text">
                 <MessageSquare size={16} />
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.9rem' }}>{chat.title}</span>
+                <span className="chat-item-title">{chat.title}</span>
               </div>
-              <Trash2 size={16} color="var(--text-muted)" onClick={(e) => deleteChat(e, chat.id)} style={{ cursor: 'pointer' }} />
+              <Trash2 
+                size={16} 
+                className="chat-item-delete"
+                onClick={(e) => deleteChat(e, chat.id)} 
+              />
             </div>
           ))}
         </div>
 
         {activeChatId && (
-          <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Knowledge Base</div>
-            <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '0.5rem' }}>
+          <div className="kb-section">
+            <div className="sidebar-section-title">Knowledge Base</div>
+            <div className="kb-documents-list">
               {documents.map(doc => (
-                <div key={doc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', fontSize: '0.85rem' }}>
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '80%' }}>{doc.filename}</span>
-                  <Trash2 size={14} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={() => deleteDocument(doc.id)} />
+                <div key={doc.id} className="kb-document-item">
+                  <span className="kb-document-filename">{doc.filename}</span>
+                  <Trash2 size={14} onClick={() => deleteDocument(doc.id)} />
                 </div>
               ))}
             </div>
@@ -279,8 +292,9 @@ function AuthenticatedApp() {
       {activeChatId ? (
         <ChatInterface chatId={activeChatId} onTitleUpdate={fetchChats} />
       ) : (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-          Create a new chat to begin.
+        <div className="chat-empty-state">
+          <h2>Welcome to RagAgent</h2>
+          <p>Create or select a chat from the sidebar, upload your PDF knowledge base, and start asking questions.</p>
         </div>
       )}
     </div>
@@ -288,15 +302,31 @@ function AuthenticatedApp() {
 }
 
 function App() {
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved;
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return prefersDark ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
   return (
     <>
       <SignedOut>
-        <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-color)' }}>
+        <div className="login-wrapper">
           <SignIn routing="hash" />
         </div>
       </SignedOut>
       <SignedIn>
-        <AuthenticatedApp />
+        <AuthenticatedApp theme={theme} onToggleTheme={toggleTheme} />
       </SignedIn>
     </>
   );

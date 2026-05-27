@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { Sparkles } from 'lucide-react';
 
 const EVIDENCE_LINE_RE = /^\[Evidence\s+(\d+)\]\s+filename=(.*?);\s*page=(.*?);\s*source=(.*?);\s*relevance=([^\n]+)$/gim;
 const PAGE_CITATION_RE = /\[(?:p\.?|page)\s*(\d+)(?:\s*[-,]\s*\d+)?\]/gi;
@@ -160,7 +161,7 @@ const ImageLightbox = ({ image, onClose }) => {
   );
 };
 
-const MessageBubble = memo(({ role, text, isStreaming = false }) => {
+const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = null }) => {
   const isUser = role === 'user';
   const visibleText = useSmoothStreamingText(text || '', isStreaming);
   const [lightboxImage, setLightboxImage] = useState(null);
@@ -203,8 +204,12 @@ const MessageBubble = memo(({ role, text, isStreaming = false }) => {
   return (
     <div className={`message-row ${role}`}>
       <div className="message-content">
-        <div className={`avatar ${role}`}>
-          {isUser ? 'U' : 'AI'}
+        <div className={`avatar ${isUser ? (userImageUrl ? 'user' : 'user-icon') : 'model'}`}>
+          {isUser ? (
+            userImageUrl ? <img src={userImageUrl} alt="User" referrerPolicy="no-referrer" /> : 'U'
+          ) : (
+            <Sparkles />
+          )}
         </div>
         <div className={`markdown-body${isStreaming ? ' streaming-markdown' : ''}`}>
           <CitationBadges citations={citations} />
