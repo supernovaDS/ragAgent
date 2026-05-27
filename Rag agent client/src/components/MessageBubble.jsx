@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Sparkles, ImageOff } from 'lucide-react';
+import { Sparkles, ImageOff, ExternalLink } from 'lucide-react';
 
 const EVIDENCE_LINE_RE = /^\[Evidence\s+(\d+)\]\s+filename=(.*?);\s*page=(.*?);\s*source=(.*?);\s*relevance=([^\n]+)$/gim;
 const PAGE_CITATION_RE = /\[(?:p\.?|page)\s*(\d+)(?:\s*[-,]\s*\d+)?\]/gi;
@@ -164,8 +164,12 @@ const ImageLightbox = ({ image, onClose }) => {
 const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
   const [failed, setFailed] = useState(false);
 
-  // Check if the URL has a complete extension to avoid making partial requests during streaming
-  const isComplete = src && src.match(/\.(png|jpg|jpeg|webp)$/i);
+  // Check if it has a standard image extension (casing-insensitive, ignoring query/hash)
+  const isImageExt = useMemo(() => {
+    if (!src) return false;
+    const cleanUrl = src.split(/[?#]/)[0];
+    return /\.(png|jpg|jpeg|webp|gif|svg)$/i.test(cleanUrl);
+  }, [src]);
 
   // If the src changes, reset the failed state so the browser can re-attempt loading the new URL
   useEffect(() => {
@@ -181,13 +185,29 @@ const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
     );
   }
 
-  // If still streaming and the URL is not yet fully typed out, show a clean loading indicator
-  if (isStreaming && !isComplete) {
+  // If still streaming and the URL is not yet recognized as an image, show a clean loading indicator
+  if (isStreaming && !isImageExt) {
     return (
       <div className="markdown-image-failed" style={{ borderStyle: 'solid' }}>
         <div className="spinner" style={{ width: 14, height: 14, borderWidth: '1.5px', borderTopColor: 'var(--accent-color)' }} />
         <span>Loading diagram...</span>
       </div>
+    );
+  }
+
+  // Once streaming is finished, if it's not a valid image extension, upgrade it to a link!
+  if (!isImageExt) {
+    return (
+      <a
+        href={src}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="markdown-link-upgrade"
+        title="Open external link"
+      >
+        <ExternalLink size={14} />
+        <span>View Link: {alt || src}</span>
+      </a>
     );
   }
 
@@ -205,7 +225,7 @@ const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
         referrerPolicy="no-referrer"
         onError={() => {
           // Only trigger failure once the URL is complete and streaming has finished
-          if (isComplete && !isStreaming) {
+          if (isImageExt && !isStreaming) {
             setFailed(true);
           }
         }}

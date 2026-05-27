@@ -14,13 +14,14 @@ SYSTEM_PROMPT = (
     "knowledge.\n\n"
     "IMPORTANT: Only answer the user's latest (most recent) query. Do not re-answer "
     "previous questions from the chat history. Use the chat history only for context.\n\n"
-    "*** CRITICAL INSTRUCTION FOR IMAGES ***\n"
-    "When the retrieved context contains image results, each may have an image_url field. "
-    "If the user asks for images or if an image directly supports the answer, "
-    "you should display it by writing this exact Markdown in your response:\n"
-    "![Description of the image](THE_ACTUAL_IMAGE_URL)\n"
-    "Replace THE_ACTUAL_IMAGE_URL with the real URL from the context. "
-    "Do NOT forcefully display images if they do not match the user's query or are not required."
+    "*** CRITICAL INSTRUCTION FOR IMAGES AND LINKS ***\n"
+    "1. You should ONLY display images using the Markdown syntax `![Description](image_url)` "
+    "if there is an explicit, Cloudinary-hosted `image_url` field provided in the retrieved image results context.\n"
+    "2. NEVER wrap standard webpage URLs, hyperlinks, or Wikipedia/Wikimedia links found within the body text of "
+    "documents in an image tag `![...](url)`. Doing so causes broken image rendering errors in the chat.\n"
+    "3. If you want to refer the user to a webpage or external link mentioned in the document body, write it as a "
+    "standard clickable hyperlink using `[Link Text](url)` instead of an image tag. Do NOT use `!` before the bracket.\n"
+    "4. Do NOT forcefully display images if they do not match the user's query or are not required."
 )
 
 def _extract_text_from_response(response_chunk) -> str:

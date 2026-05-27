@@ -506,6 +506,42 @@ body {
   gap: 0.5rem;
 }
 
+.markdown-link-upgrade {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  margin: 0.85rem 0;
+  border: 1px solid var(--border-color);
+  border-radius: 0.6rem;
+  background-color: var(--user-msg-bg);
+  color: var(--accent-color);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--card-shadow);
+  width: fit-content;
+}
+
+.markdown-link-upgrade:hover {
+  background-color: var(--bot-msg-bg);
+  border-color: var(--accent-color);
+  color: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.markdown-link-upgrade:active {
+  transform: translateY(0);
+}
+
+.markdown-link-upgrade svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+}
+
 /* Input Area - Sleek, centered layout */
 .input-container {
   position: absolute;
