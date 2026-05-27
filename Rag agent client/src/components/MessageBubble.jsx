@@ -184,6 +184,7 @@ const MarkdownImage = ({ src, alt, onZoom }) => {
         src={src} 
         alt={alt || 'Document image'} 
         loading="lazy" 
+        referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
       />
     </button>
