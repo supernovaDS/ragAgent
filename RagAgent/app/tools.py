@@ -134,7 +134,21 @@ def _normalize_scores(scores: dict[str, float]) -> dict[str, float]:
     return {key: value / max_score for key, value in scores.items()}
 
 
-def _merge_and_rerank(vector_points: list[Any], lexical_records: list[Any], lexical_scores: dict[str, float]) -> list[dict]:
+def _merge_and_rerank(
+    vector_points: list[Any],
+    lexical_records: list[Any],
+    lexical_scores: dict[str, float],
+    query: str = "",
+) -> list[dict]:
+    # Check if query has image intent
+    image_keywords = {
+        "image", "images", "logo", "diagram", "chart", "figure", "illustration",
+        "photo", "picture", "pictures", "map", "draw", "drawing", "visual",
+        "schematic", "show", "see", "look"
+    }
+    query_words = set(re.findall(r"\w+", query.lower())) if query else set()
+    has_image_intent = bool(query_words & image_keywords)
+
     candidates: dict[str, dict] = {}
     vector_scores = {}
 
@@ -172,10 +186,15 @@ def _merge_and_rerank(vector_points: list[Any], lexical_records: list[Any], lexi
         content = payload.get("text_content") or ""
         entity_type = payload.get("entity_type")
         source = payload.get("source", "")
+        has_image = bool(payload.get("image_url") or entity_type == "image")
 
         text_source_boost = 0.08 if entity_type == "text" else 0.0
-        ocr_boost = 0.04 if source in {"page_ocr", "image_text"} else 0.0
+        ocr_boost = 0.04 if source in {"page_ocr", "image_text", "embedded_image"} else 0.0
         content_boost = 0.03 if content else 0.0
+        
+        # Give images a baseline boost to compete with text, plus a large boost if the query has image intent
+        image_boost = 0.10 if has_image else 0.0
+        image_intent_boost = 0.25 if (has_image and has_image_intent) else 0.0
 
         final_score = (
             0.62 * normalized_vector.get(point_id, 0.0)
@@ -183,6 +202,8 @@ def _merge_and_rerank(vector_points: list[Any], lexical_records: list[Any], lexi
             + text_source_boost
             + ocr_boost
             + content_boost
+            + image_boost
+            + image_intent_boost
         )
 
         candidate["final_score"] = final_score
@@ -252,6 +273,7 @@ def search_knowledge_base_direct(chat_id: str, query: str, raw_query: str | None
         list(all_vector_points.values()),
         lexical_records,
         merged_lexical_scores,
+        query=raw_query or query,
     )
 
     final_candidates = reranked[: settings.FINAL_CONTEXT_LIMIT]
