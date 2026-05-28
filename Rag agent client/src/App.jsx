@@ -4,6 +4,7 @@ import FileUpload from './components/FileUpload';
 import ChatInterface from './components/ChatInterface';
 import { PlusCircle, MessageSquare, Trash2, Sun, Moon } from 'lucide-react';
 import useAuthFetch from './hooks/useAuthFetch';
+import { isTempChat } from './utils/chatUtils';
 
 function AuthenticatedApp({ theme, onToggleTheme }) {
   const authFetch = useAuthFetch();
@@ -40,7 +41,7 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
     if (!userId) return;
     try {
       if (chats.length > 0) {
-        const chatsToCache = chats.filter(c => !c.id.toString().startsWith('temp_'));
+        const chatsToCache = chats.filter(c => !isTempChat(c.id));
         localStorage.setItem(`rag_chats_${userId}`, JSON.stringify(chatsToCache));
       } else {
         localStorage.removeItem(`rag_chats_${userId}`);
@@ -54,7 +55,7 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
   useEffect(() => {
     if (!userId) return;
     try {
-      if (activeChatId && !activeChatId.toString().startsWith('temp_')) {
+      if (activeChatId && !isTempChat(activeChatId)) {
         localStorage.setItem(`rag_active_chat_${userId}`, activeChatId);
       } else if (!activeChatId) {
         localStorage.removeItem(`rag_active_chat_${userId}`);
@@ -64,13 +65,11 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
     }
   }, [activeChatId, userId]);
 
-  const getChats = useCallback(async () => {
-    return authFetch('/api/chats');
-  }, [authFetch]);
-
-  const fetchChats = useCallback(async () => {
+  // Fix #15: single fetchChats function used both for initial load and title refreshes
+  const fetchChats = useCallback(async (options = {}) => {
+    const { signal } = options;
     try {
-      const data = await getChats();
+      const data = await authFetch('/api/chats', signal ? { signal } : {});
       if (data) {
         setChats(data);
         setActiveChatId((currentId) => {
@@ -79,34 +78,18 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
         });
       }
     } catch (error) {
-      console.error("Failed to fetch chats:", error);
-    }
-  }, [getChats]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const loadChats = async () => {
-      try {
-        const data = await getChats();
-        if (!isCancelled && data) {
-          setChats(data);
-          setActiveChatId((currentId) => {
-            if (currentId && data.some((chat) => chat.id === currentId)) return currentId;
-            return data[0]?.id ?? null;
-          });
-        }
-      } catch (error) {
-        if (!isCancelled) console.error("Failed to fetch chats:", error);
+      if (error.name !== 'AbortError') {
+        console.error("Failed to fetch chats:", error);
       }
-    };
+    }
+  }, [authFetch]);
 
-    loadChats();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [getChats]);
+  // Initial load
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchChats({ signal: controller.signal });
+    return () => controller.abort();
+  }, [fetchChats]);
 
   const getDocuments = useCallback(async (chatId) => {
     return authFetch(`/api/chats/${chatId}/documents`);
@@ -200,7 +183,7 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
       }
     };
 
-    if (activeChatId.toString().startsWith('temp_')) {
+    if (isTempChat(activeChatId)) {
       setDocuments([]);
     } else {
       loadDocuments();

@@ -21,8 +21,8 @@ def call_with_retry(api_func, *args, **kwargs):
             is_rate_limit = (
                 getattr(e, "code", None) == 429 or
                 "RESOURCE_EXHAUSTED" in str(e) or
-                "quota" in str(e).lower() or
-                "limit" in str(e).lower()
+                "rate limit" in str(e).lower() or
+                "quota" in str(e).lower()
             )
             
             if is_rate_limit and attempt < max_retries - 1:

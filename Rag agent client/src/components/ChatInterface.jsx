@@ -2,6 +2,30 @@ import { useState, useRef, useEffect } from 'react';
 import { useUser } from "@clerk/clerk-react";
 import MessageBubble from './MessageBubble';
 import useAuthFetch from '../hooks/useAuthFetch';
+import { isTempChat } from '../utils/chatUtils';
+
+// Fix #16: extracted shared metadata cache management
+function updateCacheMetadata(userId, chatId, action) {
+  const metaKey = `rag_cached_chats_metadata_${userId}`;
+  try {
+    const raw = localStorage.getItem(metaKey);
+    let cachedList = raw ? JSON.parse(raw) : [];
+    cachedList = cachedList.filter(id => id !== chatId);
+
+    if (action === 'add') {
+      cachedList.push(chatId);
+      const LIMIT = 10;
+      while (cachedList.length > LIMIT) {
+        const evictedId = cachedList.shift();
+        localStorage.removeItem(`rag_messages_${userId}_${evictedId}`);
+      }
+    }
+
+    localStorage.setItem(metaKey, JSON.stringify(cachedList));
+  } catch (e) {
+    console.error("Failed to update cached chats metadata:", e);
+  }
+}
 
 const ChatInterface = ({ chatId, onTitleUpdate }) => {
   const [messages, setMessages] = useState([]);
@@ -18,12 +42,11 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-
   useEffect(() => {
     const controller = new AbortController();
     const fetchMessages = async () => {
       let hasCache = false;
-      if (userId && chatId && !chatId.toString().startsWith('temp_')) {
+      if (userId && chatId && !isTempChat(chatId)) {
         try {
           const cached = localStorage.getItem(`rag_messages_${userId}_${chatId}`);
           if (cached) {
@@ -54,7 +77,7 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
       }
     };
     if (chatId) {
-      if (chatId.toString().startsWith('temp_')) {
+      if (isTempChat(chatId)) {
         setMessages([]);
         setIsFetching(false);
       } else {
@@ -66,44 +89,14 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
 
   // Sync messages to cache once loading/streaming are complete
   useEffect(() => {
-    if (!userId || !chatId || chatId.toString().startsWith('temp_') || isLoading || streamingMessage) return;
+    if (!userId || !chatId || isTempChat(chatId) || isLoading || streamingMessage) return;
     try {
       if (messages.length > 0) {
         localStorage.setItem(`rag_messages_${userId}_${chatId}`, JSON.stringify(messages));
-        
-        const metaKey = `rag_cached_chats_metadata_${userId}`;
-        let cachedList = [];
-        try {
-          const cachedListStr = localStorage.getItem(metaKey);
-          if (cachedListStr) {
-            cachedList = JSON.parse(cachedListStr);
-          }
-        } catch (e) {
-          console.error("Failed to parse cached chats metadata list:", e);
-        }
-        
-        cachedList = cachedList.filter(id => id !== chatId);
-        cachedList.push(chatId);
-        
-        const LIMIT = 10;
-        while (cachedList.length > LIMIT) {
-          const evictedId = cachedList.shift();
-          localStorage.removeItem(`rag_messages_${userId}_${evictedId}`);
-        }
-        
-        localStorage.setItem(metaKey, JSON.stringify(cachedList));
+        updateCacheMetadata(userId, chatId, 'add');
       } else {
         localStorage.removeItem(`rag_messages_${userId}_${chatId}`);
-        const metaKey = `rag_cached_chats_metadata_${userId}`;
-        try {
-          const cachedListStr = localStorage.getItem(metaKey);
-          if (cachedListStr) {
-            const cachedList = JSON.parse(cachedListStr).filter(id => id !== chatId);
-            localStorage.setItem(metaKey, JSON.stringify(cachedList));
-          }
-        } catch (e) {
-          console.error("Failed to parse cached chats metadata list:", e);
-        }
+        updateCacheMetadata(userId, chatId, 'remove');
       }
     } catch (e) {
       console.error("Failed to cache messages:", e);
@@ -209,14 +202,14 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
         <form className="input-box" onSubmit={handleSubmit}>
           <textarea
             className="chat-input"
-            placeholder={chatId.toString().startsWith('temp_') ? "Creating chat..." : "Message RagAgent..."}
+            placeholder={isTempChat(chatId) ? "Creating chat..." : "Message RagAgent..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isLoading || chatId.toString().startsWith('temp_')}
+            disabled={isLoading || isTempChat(chatId)}
             rows={1}
           />
-          <button className="send-button" type="submit" disabled={!inputValue.trim() || isLoading || chatId.toString().startsWith('temp_')}>
+          <button className="send-button" type="submit" disabled={!inputValue.trim() || isLoading || isTempChat(chatId)}>
             Send
           </button>
         </form>

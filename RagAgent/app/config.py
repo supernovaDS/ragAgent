@@ -13,7 +13,10 @@ class Settings(BaseSettings):
     SUPABASE_DATABASE_URL: str
     CLERK_SECRET_KEY: str
     CLERK_JWKS_URL: str = ""
+    # Override this with your production domain(s) when deploying — never use "*"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
+    # Set to False in production to enforce JWT verification and hide debug endpoints
+    DEBUG: bool = True
     
     # Hardcoded 3072 dims for Gemini Embedding 2
     VECTOR_DIMENSION: int = 3072 

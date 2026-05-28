@@ -100,26 +100,7 @@ def _extract_text_from_image_bytes(image_bytes: bytes, mime_type: str, prompt: s
     )
     return _clean_extracted_text(_extract_response_text(response))
 
-def _ocr_page_if_needed(page: fitz.Page, extracted_text: str) -> str:
-    if not settings.ENABLE_GEMINI_OCR:
-        return ""
-    if len(extracted_text.strip()) >= settings.OCR_TEXT_MIN_CHARS:
-        return ""
 
-    try:
-        page_png = _render_page_png(page)
-        return _extract_text_from_image_bytes(
-            page_png,
-            "image/png",
-            (
-                "Extract all readable text from this PDF page. Preserve important "
-                "labels, numbers, table-like rows, headings, and bullet points. "
-                "Return only the extracted text. If no text is visible, return an empty string."
-            ),
-        )
-    except Exception as e:
-        print(f"Gemini OCR failed for page {page.number + 1}: {e}")
-        return ""
 
 def _describe_image_for_search(image_bytes: bytes, mime_type: str) -> str:
     if not settings.ENABLE_IMAGE_TEXT_EXTRACTION:
@@ -188,10 +169,13 @@ def _process_single_image(
     chat_id: str,
 ) -> dict | None:
     try:
+        # Fix #4: scope uploads into a user folder for access isolation
+        folder = f"ragagent/{user_id}"
         public_id = f"{doc_id}_page{page_number}_img{img_index}"
         upload_result = cloudinary.uploader.upload(
             image_bytes_data, 
             public_id=public_id,
+            folder=folder,
             resource_type="image"
         )
         image_url = upload_result["secure_url"]

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import useAuthFetch from '../hooks/useAuthFetch';
+import { isTempChat } from '../utils/chatUtils';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -47,7 +48,7 @@ const FileUpload = ({ chatId, onUploadComplete }) => {
   };
 
   const handleUploadClick = () => {
-    if (chatId && chatId.toString().startsWith('temp_')) {
+    if (isTempChat(chatId)) {
       return;
     }
     fileInputRef.current?.click();
@@ -59,8 +60,8 @@ const FileUpload = ({ chatId, onUploadComplete }) => {
         className="upload-zone" 
         onClick={handleUploadClick}
         style={{
-          opacity: chatId && chatId.toString().startsWith('temp_') ? 0.5 : 1,
-          cursor: chatId && chatId.toString().startsWith('temp_') ? 'not-allowed' : 'pointer'
+          opacity: isTempChat(chatId) ? 0.5 : 1,
+          cursor: isTempChat(chatId) ? 'not-allowed' : 'pointer'
         }}
       >
         <input 

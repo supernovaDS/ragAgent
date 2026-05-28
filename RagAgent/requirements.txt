@@ -11,3 +11,4 @@ psycopg2-binary
 PyJWT
 langchain-text-splitters
 pydantic
+slowapi>=0.1.9
