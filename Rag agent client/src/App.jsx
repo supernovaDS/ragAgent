@@ -22,14 +22,15 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
       const cachedChats = localStorage.getItem(`rag_chats_${userId}`);
       if (cachedChats) {
         const parsedChats = JSON.parse(cachedChats);
-        setChats(parsedChats);
-        
         const cachedActiveId = localStorage.getItem(`rag_active_chat_${userId}`);
-        if (cachedActiveId && parsedChats.some(c => c.id === cachedActiveId)) {
-          setActiveChatId(cachedActiveId);
-        } else if (parsedChats.length > 0) {
-          setActiveChatId(parsedChats[0].id);
-        }
+        const nextActiveId = cachedActiveId && parsedChats.some(c => c.id === cachedActiveId)
+          ? cachedActiveId
+          : parsedChats[0]?.id ?? null;
+
+        queueMicrotask(() => {
+          setChats(parsedChats);
+          setActiveChatId(nextActiveId);
+        });
       }
     } catch (e) {
       console.error("Failed to load cached chats:", e);
@@ -87,8 +88,13 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
   // Initial load
   useEffect(() => {
     const controller = new AbortController();
-    fetchChats({ signal: controller.signal });
-    return () => controller.abort();
+    const timeoutId = window.setTimeout(() => {
+      fetchChats({ signal: controller.signal });
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [fetchChats]);
 
   const getDocuments = useCallback(async (chatId) => {
@@ -184,7 +190,7 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
     };
 
     if (isTempChat(activeChatId)) {
-      setDocuments([]);
+      queueMicrotask(() => setDocuments([]));
     } else {
       loadDocuments();
     }

@@ -27,7 +27,9 @@ export default function useAuthFetch() {
       try {
         const parsed = JSON.parse(errorText);
         errorDetail = parsed.detail || parsed.message || '';
-      } catch {}
+      } catch {
+        // Response body was not JSON; fall back to the HTTP status below.
+      }
       throw new Error(errorDetail || `Request failed with status ${res.status}`);
     }
 

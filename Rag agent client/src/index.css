@@ -469,6 +469,55 @@ body {
   font-size: 0.85rem;
 }
 
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.9rem 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  background-color: var(--user-msg-bg);
+}
+
+.markdown-body thead,
+.markdown-body tbody,
+.markdown-body tr {
+  width: 100%;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.84rem;
+}
+
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  border-right: none;
+}
+
+.markdown-body tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-body th {
+  background-color: var(--bot-msg-bg);
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.markdown-body td {
+  color: var(--text-main);
+}
+
 .markdown-image-button {
   appearance: none;
   display: block;

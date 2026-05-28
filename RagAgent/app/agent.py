@@ -12,6 +12,11 @@ SYSTEM_PROMPT = (
     "documents. If the provided context does not contain enough evidence, say that the "
     "information was not found in the uploaded documents before adding any general "
     "knowledge.\n\n"
+    "When the answer spans multiple pages, combine the relevant evidence across pages "
+    "instead of treating each chunk independently. Mention all important page citations. "
+    "When the context contains a Markdown table, preserve it as a clean Markdown table "
+    "for tabular answers. Do not flatten tables into comma-separated text unless the "
+    "user asks for a prose summary.\n\n"
     "IMPORTANT: Only answer the user's latest (most recent) query. Do not re-answer "
     "previous questions from the chat history. Use the chat history only for context.\n\n"
     "*** CRITICAL INSTRUCTION FOR IMAGES AND LINKS ***\n"
@@ -52,6 +57,11 @@ def _format_retrieved_context(results: list[dict]) -> str:
             f"[Evidence {idx}] filename={filename}; page={page}; "
             f"source={source}; relevance={score}"
         )
+        metadata = (
+            f"type={result.get('type')}; "
+            f"context_role={result.get('context_role', 'direct_match')}; "
+            f"retrieval_mode={result.get('intelligence_mode', 'deterministic')}"
+        )
 
         content = result.get("content") or ""
         image_url = result.get("image_url")
@@ -60,7 +70,7 @@ def _format_retrieved_context(results: list[dict]) -> str:
         if image_url:
             content = f"{content}\nimage_url={image_url}"
 
-        blocks.append(f"{header}\n{content}".strip())
+        blocks.append(f"{header}\n{metadata}\n{content}".strip())
 
     return "\n\n".join(blocks)
 
@@ -99,7 +109,10 @@ def chat_with_pdf_agent(user_query: str, chat_id: str, history: list[Message] = 
                         f"Latest user question:\n{user_query}\n\n"
                         f"Retrieved document context:\n{retrieved_context}\n\n"
                         "Answer the latest user question using the retrieved context. "
-                        "Cite pages for document-supported facts."
+                        "For multi-page questions, synthesize across every relevant "
+                        "evidence block before concluding. If table evidence is present "
+                        "and the user asks for tabular information, render a valid "
+                        "Markdown table. Cite pages for document-supported facts."
                     )
                 )
             ],

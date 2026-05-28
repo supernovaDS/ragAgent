@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Sparkles, ImageOff, ExternalLink } from 'lucide-react';
 
 const EVIDENCE_LINE_RE = /^\[Evidence\s+(\d+)\]\s+filename=(.*?);\s*page=(.*?);\s*source=(.*?);\s*relevance=([^\n]+)$/gim;
@@ -162,18 +163,14 @@ const ImageLightbox = ({ image, onClose }) => {
 };
 
 const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
-  const [failed, setFailed] = useState(false);
+  const [failedImage, setFailedImage] = useState({ src: null, failed: false });
+  const failed = failedImage.failed && failedImage.src === src;
 
   // Check if it has a standard image extension (casing-insensitive, ignoring query/hash)
   const isImageExt = useMemo(() => {
     if (!src) return false;
     const cleanUrl = src.split(/[?#]/)[0];
     return /\.(png|jpg|jpeg|webp|gif|svg)$/i.test(cleanUrl);
-  }, [src]);
-
-  // If the src changes, reset the failed state so the browser can re-attempt loading the new URL
-  useEffect(() => {
-    setFailed(false);
   }, [src]);
 
   if (failed) {
@@ -226,7 +223,7 @@ const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
         onError={() => {
           // Only trigger failure once the URL is complete and streaming has finished
           if (isImageExt && !isStreaming) {
-            setFailed(true);
+            setFailedImage({ src, failed: true });
           }
         }}
       />
@@ -284,7 +281,7 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
         </div>
         <div className={`markdown-body${isStreaming ? ' streaming-markdown' : ''}`}>
           <CitationBadges citations={citations} />
-          <ReactMarkdown components={markdownComponents}>{markdownText}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{markdownText}</ReactMarkdown>
         </div>
       </div>
       <ImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />

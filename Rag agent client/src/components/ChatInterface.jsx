@@ -78,8 +78,10 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
     };
     if (chatId) {
       if (isTempChat(chatId)) {
-        setMessages([]);
-        setIsFetching(false);
+        queueMicrotask(() => {
+          setMessages([]);
+          setIsFetching(false);
+        });
       } else {
         fetchMessages();
       }

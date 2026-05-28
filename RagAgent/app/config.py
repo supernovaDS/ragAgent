@@ -24,7 +24,16 @@ class Settings(BaseSettings):
     # retrieval knobs (favor recall)
     VECTOR_SEARCH_LIMIT: int = 50
     FINAL_CONTEXT_LIMIT: int = 15
+    EXPANDED_CONTEXT_LIMIT: int = 24
     LEXICAL_SCAN_LIMIT: int = 2500
+    CONTEXT_NEIGHBOR_PAGES: int = 1
+    CONTEXT_CHUNKS_PER_PAGE: int = 3
+    TABLE_CHUNK_MAX_CHARS: int = 6000
+    ENABLE_RULE_BASED_QUERY_EXPANSION: bool = True
+    MAX_EXPANDED_SEARCH_QUERIES: int = 4
+    ENABLE_LLM_RERANKER: bool = True
+    RERANK_CANDIDATE_LIMIT: int = 30
+    RERANK_OUTPUT_LIMIT: int = 18
     ENABLE_GEMINI_OCR: bool = True
     ENABLE_IMAGE_TEXT_EXTRACTION: bool = True
     OCR_TEXT_MIN_CHARS: int = 80

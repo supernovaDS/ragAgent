@@ -1,5 +1,6 @@
 import uuid
 import re
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import fitz  # PyMuPDF
 import cloudinary.uploader
@@ -11,6 +12,8 @@ from app.config import settings
 from app.database import db
 from app.genai_client import client
 from app.utils import call_with_retry
+
+logger = logging.getLogger(__name__)
 
 
 def get_multimodal_embedding(content: bytes | str, is_image: bool = False, mime_type: str = "image/png") -> list[float]:
@@ -71,6 +74,89 @@ def _clean_extracted_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
+def _clean_table_cell(value) -> str:
+    text = "" if value is None else str(value)
+    text = _clean_extracted_text(text)
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+def _table_to_markdown(rows: list[list]) -> str:
+    cleaned_rows = [
+        [_clean_table_cell(cell) for cell in row]
+        for row in rows
+        if row and any(_clean_table_cell(cell) for cell in row)
+    ]
+    if not cleaned_rows:
+        return ""
+
+    column_count = max(len(row) for row in cleaned_rows)
+    normalized_rows = [row + [""] * (column_count - len(row)) for row in cleaned_rows]
+
+    header = normalized_rows[0]
+    body = normalized_rows[1:] or [[""] * column_count]
+    separator = ["---"] * column_count
+
+    markdown_rows = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(separator) + " |",
+    ]
+    markdown_rows.extend("| " + " | ".join(row) + " |" for row in body)
+    return "\n".join(markdown_rows)
+
+def _split_markdown_table(table_text: str, max_chars: int) -> list[str]:
+    if len(table_text) <= max_chars:
+        return [table_text]
+
+    lines = table_text.splitlines()
+    prefix = []
+    while lines and not lines[0].startswith("|"):
+        prefix.append(lines.pop(0))
+
+    if len(lines) < 3:
+        return [table_text[i:i + max_chars] for i in range(0, len(table_text), max_chars)]
+
+    header_lines = lines[:2]
+    body_lines = lines[2:]
+    prefix_text = "\n".join(prefix).strip()
+    table_prefix = f"{prefix_text}\n" if prefix_text else ""
+    chunks = []
+    current = table_prefix + "\n".join(header_lines)
+
+    for row in body_lines:
+        candidate = f"{current}\n{row}"
+        if len(candidate) > max_chars and current != table_prefix + "\n".join(header_lines):
+            chunks.append(current)
+            current = table_prefix + "\n".join(header_lines) + "\n" + row
+        else:
+            current = candidate
+
+    if current.strip():
+        chunks.append(current)
+
+    return chunks
+
+def _extract_tables_from_page(page: fitz.Page) -> list[str]:
+    """Extract tables as GitHub-flavored Markdown when PyMuPDF can detect them."""
+    if not hasattr(page, "find_tables"):
+        return []
+
+    try:
+        tables = page.find_tables()
+    except Exception:
+        logger.exception(f"Table extraction failed on page {page.number + 1}")
+        return []
+
+    markdown_tables = []
+    for table_index, table in enumerate(getattr(tables, "tables", []) or []):
+        try:
+            rows = table.extract()
+            markdown = _table_to_markdown(rows)
+            if markdown:
+                markdown_tables.append(f"Table {table_index + 1}:\n{markdown}")
+        except Exception:
+            logger.exception(f"Failed to convert table {table_index + 1} on page {page.number + 1}")
+
+    return markdown_tables
+
 def _extract_page_text(page: fitz.Page) -> str:
     """Extract text from page"""
     try:
@@ -113,11 +199,12 @@ def _describe_image_for_search(image_bytes: bytes, mime_type: str) -> str:
             (
                 "Extract any readable text from this image and add a concise factual "
                 "description of the image. Preserve labels, legend text, axis names, "
-                "numbers, and table values. Return only searchable content."
+                "numbers, and table values. If the image contains a table, render it "
+                "as a valid Markdown table. Return only searchable content."
             ),
         )
-    except Exception as e:
-        print(f"Image text extraction failed: {e}")
+    except Exception:
+        logger.exception("Image text extraction failed")
         return ""
 
 def _add_text_chunks(
@@ -127,12 +214,16 @@ def _add_text_chunks(
     page_number: int,
     source: str,
     image_url: str | None = None,
+    entity_type: str = "text",
 ):
     cleaned = _clean_extracted_text(text)
     if not cleaned:
         return
 
-    chunks = splitter.split_text(cleaned)
+    if entity_type == "table":
+        chunks = _split_markdown_table(cleaned, settings.TABLE_CHUNK_MAX_CHARS)
+    else:
+        chunks = splitter.split_text(cleaned)
     for chunk_idx, chunk_text in enumerate(chunks):
         text_chunks_metadata.append({
             "text": chunk_text,
@@ -140,6 +231,7 @@ def _add_text_chunks(
             "chunk_index": chunk_idx,
             "source": source,
             "image_url": image_url,
+            "entity_type": entity_type,
         })
 
 def _ocr_page_from_bytes(page_png: bytes, page_number: int) -> tuple[int, str]:
@@ -149,13 +241,14 @@ def _ocr_page_from_bytes(page_png: bytes, page_number: int) -> tuple[int, str]:
             "image/png",
             (
                 "Extract all readable text from this PDF page. Preserve important "
-                "labels, numbers, table-like rows, headings, and bullet points. "
+                "labels, numbers, headings, and bullet points. If the page contains "
+                "a table, render it as a valid Markdown table with rows and columns. "
                 "Return only the extracted text. If no text is visible, return an empty string."
             ),
         )
         return page_number, ocr_text
-    except Exception as e:
-        print(f"Gemini OCR failed for page {page_number}: {e}")
+    except Exception:
+        logger.exception(f"Gemini OCR failed for page {page_number}")
         return page_number, ""
 
 def _process_single_image(
@@ -192,14 +285,14 @@ def _process_single_image(
             "user_id": user_id,
             "chat_id": chat_id,
         }
-    except Exception as e:
-        print(f"Failed to process image {img_index} on page {page_number}: {e}")
+    except Exception:
+        logger.exception(f"Failed to process image {img_index} on page {page_number}")
         return None
 
 def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> str:
     """Ingest PDF: extract text/images, embed, upload to Cloudinary & Qdrant, return doc ID."""
     doc_id = str(uuid.uuid4())
-    print(f"Starting ingestion for document {doc_id} (Chat: {chat_id})")
+    logger.info(f"Starting ingestion for document {doc_id} (Chat: {chat_id})")
     
     # load PDF
     pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
@@ -227,20 +320,30 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                     source="pdf_text",
                 )
 
+                for table_text in _extract_tables_from_page(page):
+                    _add_text_chunks(
+                        text_chunks_metadata,
+                        text_splitter,
+                        table_text,
+                        page_number,
+                        source="table",
+                        entity_type="table",
+                    )
+
                 # Check if OCR is needed
                 if settings.ENABLE_GEMINI_OCR and len(text_content.strip()) < settings.OCR_TEXT_MIN_CHARS:
                     try:
                         page_png = _render_page_png(page)
                         future = executor.submit(_ocr_page_from_bytes, page_png, page_number)
                         ocr_futures.append(future)
-                    except Exception as render_err:
-                        print(f"Failed to render page {page_number} for OCR: {render_err}")
+                    except Exception:
+                        logger.exception(f"Failed to render page {page_number} for OCR")
                 
                 # 2. Image extraction on main thread and submit to worker
                 try:
                     image_list = page.get_images(full=True)
-                except Exception as img_err:
-                    print(f"Failed to list images on page {page_number}: {img_err}")
+                except Exception:
+                    logger.exception(f"Failed to list images on page {page_number}")
                     image_list = []
 
                 for img_index, img_info in enumerate(image_list):
@@ -263,8 +366,8 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                             chat_id
                         )
                         image_futures.append(future)
-                    except Exception as e:
-                        print(f"Failed to extract image {img_index} on page {page_number}: {e}")
+                    except Exception:
+                        logger.exception(f"Failed to extract image {img_index} on page {page_number}")
 
             # Wait for OCR tasks to finish
             for future in ocr_futures:
@@ -280,8 +383,8 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                                 p_num,
                                 source="page_ocr",
                             )
-                except Exception as exc:
-                    print(f"OCR future generated an exception: {exc}")
+                except Exception:
+                    logger.exception("OCR future generated an exception")
 
             # Wait for image tasks to finish
             for future in image_futures:
@@ -317,13 +420,13 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                                 source="image_text",
                                 image_url=img_res["image_url"],
                             )
-                except Exception as exc:
-                    print(f"Image processing future generated an exception: {exc}")
+                except Exception:
+                    logger.exception("Image processing future generated an exception")
 
         # batch process text chunks
         batch_size = 100
         if text_chunks_metadata:
-            print(f"Batch embedding {len(text_chunks_metadata)} text chunks...")
+            logger.info(f"Batch embedding {len(text_chunks_metadata)} text chunks...")
             for i in range(0, len(text_chunks_metadata), batch_size):
                 batch = text_chunks_metadata[i:i + batch_size]
                 batch_texts = [item["text"] for item in batch]
@@ -339,7 +442,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                                 "document_id": doc_id,
                                 "page_number": item["page_number"],
                                 "chunk_index": item["chunk_index"],
-                                "entity_type": "text",
+                                "entity_type": item.get("entity_type", "text"),
                                 "text_content": item["text"],
                                 "image_url": item.get("image_url"),
                                 "source": item.get("source", "pdf_text"),
@@ -352,12 +455,12 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
 
         # upsert to Qdrant
         if points:
-            print(f"Upserting {len(points)} vectors to Qdrant...")
+            logger.info(f"Upserting {len(points)} vectors to Qdrant...")
             db.client.upsert(
                 collection_name=settings.QDRANT_COLLECTION_NAME,
                 points=points
             )
-            print("Upsert complete.")
+            logger.info("Upsert complete.")
             
         return doc_id
     finally:
