@@ -50,6 +50,7 @@ app.add_middleware(
 app.include_router(api_router)
 
 @app.get("/health")
+@limiter.exempt
 async def health_check():
     """Health check — returns only status. Internal details are logged server-side."""
     try:
