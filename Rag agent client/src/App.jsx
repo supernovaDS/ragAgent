@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { SignedIn, SignedOut, SignIn, UserButton, useUser } from "@clerk/clerk-react";
 import FileUpload from './components/FileUpload';
 import ChatInterface from './components/ChatInterface';
-import { PlusCircle, MessageSquare, Trash2, Sun, Moon } from 'lucide-react';
+import { PlusCircle, MessageSquare, Trash2, Sun, Moon, Menu, X } from 'lucide-react';
 import useAuthFetch from './hooks/useAuthFetch';
 import { isTempChat } from './utils/chatUtils';
 
@@ -14,6 +14,7 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Load from localStorage cache once userId is available
   useEffect(() => {
@@ -217,7 +218,14 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
 
   return (
     <div className="app-container">
-      <div className="sidebar">
+      {isSidebarOpen && (
+        <div 
+          className="sidebar-overlay" 
+          onClick={() => setIsSidebarOpen(false)} 
+        />
+      )}
+
+      <div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-title">RagAgent</div>
           <div className="sidebar-header-right">
@@ -229,11 +237,21 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
             </button>
             <UserButton />
+            <button 
+              className="sidebar-close-btn"
+              onClick={() => setIsSidebarOpen(false)}
+              aria-label="Close sidebar"
+            >
+              <X size={18} />
+            </button>
           </div>
         </div>
         
         <button 
-          onClick={createNewChat}
+          onClick={() => {
+            createNewChat();
+            setIsSidebarOpen(false);
+          }}
           className="sidebar-action-btn"
         >
           <PlusCircle size={18} /> New Chat
@@ -244,7 +262,10 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
           {chats.map(chat => (
             <div 
               key={chat.id} 
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => {
+                setActiveChatId(chat.id);
+                setIsSidebarOpen(false);
+              }}
               className={`chat-list-item ${activeChatId === chat.id ? 'active' : ''}`}
             >
               <div className="chat-item-text">
@@ -278,14 +299,32 @@ function AuthenticatedApp({ theme, onToggleTheme }) {
         )}
       </div>
 
-      {activeChatId ? (
-        <ChatInterface chatId={activeChatId} onTitleUpdate={fetchChats} />
-      ) : (
-        <div className="chat-empty-state">
-          <h2>Welcome to RagAgent</h2>
-          <p>Create or select a chat from the sidebar, upload your PDF knowledge base, and start asking questions.</p>
+      <div className="main-content-wrapper">
+        <div className="mobile-header">
+          <button 
+            className="hamburger-menu-btn"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="mobile-header-title">
+            {activeChatId 
+              ? (chats.find(c => c.id === activeChatId)?.title || "Chat") 
+              : "RagAgent"}
+          </div>
+          <div style={{ width: 32 }} />
         </div>
-      )}
+
+        {activeChatId ? (
+          <ChatInterface chatId={activeChatId} onTitleUpdate={fetchChats} />
+        ) : (
+          <div className="chat-empty-state">
+            <h2>Welcome to RagAgent</h2>
+            <p>Create or select a chat from the sidebar, upload your PDF knowledge base, and start asking questions.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
