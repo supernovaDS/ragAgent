@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Sparkles, ImageOff, ExternalLink } from 'lucide-react';
+import { Sparkles, ImageOff, ExternalLink, Brain, ChevronDown, ChevronUp } from 'lucide-react';
 
 const EVIDENCE_LINE_RE = /^\[Evidence\s+(\d+)\]\s+filename=(.*?);\s*page=(.*?);\s*source=(.*?);\s*relevance=([^\n]+)$/gim;
 const PAGE_CITATION_RE = /\[(?:p\.?|page)\s*(\d+)(?:\s*[-,]\s*\d+)?\]/gi;
@@ -49,6 +49,34 @@ const parseEvidence = (text) => {
   return citations;
 };
 
+const parseThinkingAndContent = (text) => {
+  const detailsStart = text.indexOf('<details><summary>Thinking Process</summary>');
+  if (detailsStart === -1) {
+    return { thinking: '', content: text, hasThinking: false, isThinkingComplete: false };
+  }
+
+  const contentBefore = text.slice(0, detailsStart);
+  const detailsEnd = text.indexOf('</details>', detailsStart);
+  if (detailsEnd === -1) {
+    const thinkingPart = text.slice(detailsStart + '<details><summary>Thinking Process</summary>'.length);
+    return {
+      thinking: thinkingPart.trim(),
+      content: contentBefore.trim(),
+      hasThinking: true,
+      isThinkingComplete: false
+    };
+  } else {
+    const thinkingPart = text.slice(detailsStart + '<details><summary>Thinking Process</summary>'.length, detailsEnd);
+    const contentPart = contentBefore + text.slice(detailsEnd + '</details>'.length);
+    return {
+      thinking: thinkingPart.trim(),
+      content: contentPart.trim(),
+      hasThinking: true,
+      isThinkingComplete: true
+    };
+  }
+};
+
 const prepareMarkdown = (text) => (
   text
     .replace(EVIDENCE_LINE_RE, '')
@@ -56,6 +84,54 @@ const prepareMarkdown = (text) => (
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 );
+
+const ThinkingAccordion = ({ thinking, isThinkingComplete }) => {
+  const [isOpen, setIsOpen] = useState(true);
+  const wasThinkingCompleteRef = useRef(isThinkingComplete);
+
+  useEffect(() => {
+    // If it transitions from incomplete to complete, collapse it automatically!
+    if (!wasThinkingCompleteRef.current && isThinkingComplete) {
+      setIsOpen(false);
+    }
+    wasThinkingCompleteRef.current = isThinkingComplete;
+  }, [isThinkingComplete]);
+
+  // If we load an already completed thinking process, default to collapsed
+  useEffect(() => {
+    if (isThinkingComplete) {
+      setIsOpen(false);
+    } else {
+      setIsOpen(true);
+    }
+  }, []);
+
+  if (!thinking) return null;
+
+  return (
+    <div className={`thinking-accordion ${isOpen ? 'open' : 'collapsed'}`}>
+      <button
+        type="button"
+        className="thinking-header"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
+      >
+        <span className="thinking-title">
+          <Brain className={`thinking-icon ${!isThinkingComplete ? 'pulsing-brain' : ''}`} size={16} />
+          <span>{isThinkingComplete ? 'Thought Process' : 'Thinking...'}</span>
+        </span>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+      {isOpen && (
+        <div className="thinking-content">
+          <div className="thinking-inner">
+            {thinking}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const useSmoothStreamingText = (targetText, enabled) => {
   const [visibleText, setVisibleText] = useState('');
@@ -175,20 +251,20 @@ const MarkdownImage = ({ src, alt, onZoom, isStreaming }) => {
 
   if (failed) {
     return (
-      <div className="markdown-image-failed" title="Failed to load document image">
+      <span className="markdown-image-failed" title="Failed to load document image" style={{ display: 'inline-flex' }}>
         <ImageOff size={16} />
         <span>Image failed to load</span>
-      </div>
+      </span>
     );
   }
 
   // If still streaming and the URL is not yet recognized as an image, show a clean loading indicator
   if (isStreaming && !isImageExt) {
     return (
-      <div className="markdown-image-failed" style={{ borderStyle: 'solid' }}>
+      <span className="markdown-image-failed" style={{ borderStyle: 'solid', display: 'inline-flex' }}>
         <div className="spinner" style={{ width: 14, height: 14, borderWidth: '1.5px', borderTopColor: 'var(--accent-color)' }} />
         <span>Loading diagram...</span>
-      </div>
+      </span>
     );
   }
 
@@ -237,8 +313,12 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
   const [lightboxImage, setLightboxImage] = useState(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
+  const { thinking, content, isThinkingComplete } = useMemo(() => {
+    return parseThinkingAndContent(visibleText);
+  }, [visibleText]);
+
   const citations = useMemo(() => parseEvidence(visibleText), [visibleText]);
-  const markdownText = useMemo(() => prepareMarkdown(visibleText), [visibleText]);
+  const markdownText = useMemo(() => prepareMarkdown(content), [content]);
 
   const markdownComponents = useMemo(() => ({
     img({ src, alt }) {
@@ -281,7 +361,12 @@ const MessageBubble = memo(({ role, text, isStreaming = false, userImageUrl = nu
         </div>
         <div className={`markdown-body${isStreaming ? ' streaming-markdown' : ''}`}>
           <CitationBadges citations={citations} />
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{markdownText}</ReactMarkdown>
+          <ThinkingAccordion thinking={thinking} isThinkingComplete={isThinkingComplete} />
+          {markdownText ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {markdownText}
+            </ReactMarkdown>
+          ) : null}
         </div>
       </div>
       <ImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />

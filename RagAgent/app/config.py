@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     GEMINI_API_KEY: str
     GEMINI_GENERATION_MODEL: str = "gemini-3.1-flash-lite"
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_GENERATION_MODEL: str = "deepseek-v4-flash"
     QDRANT_URL: str
     QDRANT_API_KEY: str
     QDRANT_COLLECTION_NAME: str = "pdf_knowledge_base"
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
     VECTOR_DIMENSION: int = 3072 
     
     # retrieval knobs (favor recall)
-    VECTOR_SEARCH_LIMIT: int = 50
+    VECTOR_SEARCH_LIMIT: int = 50 
     FINAL_CONTEXT_LIMIT: int = 15
     EXPANDED_CONTEXT_LIMIT: int = 24
     LEXICAL_SCAN_LIMIT: int = 2500

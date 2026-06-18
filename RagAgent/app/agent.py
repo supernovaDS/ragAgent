@@ -4,6 +4,7 @@ from app.tools import get_search_tool
 from app.models import Message
 from app.genai_client import client
 from app.config import settings
+from app.deepseek_client import deepseek_client
 
 SYSTEM_PROMPT = (
     "You are an AI assistant answering questions about uploaded documents. The system "
@@ -75,57 +76,107 @@ def _format_retrieved_context(results: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-def chat_with_pdf_agent(user_query: str, chat_id: str, history: list[Message] = None):
+async def chat_with_pdf_agent(user_query: str, chat_id: str, history: list[Message] = None, thinking_mode: bool = True):
     """
     Main agent reasoning loop. Connects the model to tools and streams the answer.
     """
     print(f"\n[User] {user_query}")
     
-    # get isolated tool for this chat
     search_knowledge_base = get_search_tool(chat_id, raw_query=user_query)
-    # 1. Initialize conversation history
-    contents = []
     
-    # append history
-    if history:
-        for msg in history:
-            contents.append(
-                types.Content(
-                    role=msg.role,
-                    parts=[types.Part.from_text(text=msg.text)]
-                )
-            )
-            
     # always search deterministically to avoid missing evidence
     tool_results = search_knowledge_base(query=user_query)
     retrieved_context = _format_retrieved_context(tool_results)
 
-    contents.append(
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_text(
-                    text=(
-                        f"Latest user question:\n{user_query}\n\n"
-                        f"Retrieved document context:\n{retrieved_context}\n\n"
-                        "Answer the latest user question using the retrieved context. "
-                        "For multi-page questions, synthesize across every relevant "
-                        "evidence block before concluding. If table evidence is present "
-                        "and the user asks for tabular information, render a valid "
-                        "Markdown table. Cite pages for document-supported facts."
+    if deepseek_client:
+        print("[Agent] Synthesizing final answer from retrieved context via DeepSeek...")
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if history:
+            for msg in history:
+                messages.append({"role": "user" if msg.role == "user" else "assistant", "content": msg.text})
+        
+        messages.append({
+            "role": "user",
+            "content": (
+                f"Latest user question:\n{user_query}\n\n"
+                f"Retrieved document context:\n{retrieved_context}\n\n"
+                "Answer the latest user question using the retrieved context. "
+                "For multi-page questions, synthesize across every relevant "
+                "evidence block before concluding. If table evidence is present "
+                "and the user asks for tabular information, render a valid "
+                "Markdown table. Cite pages for document-supported facts."
+            )
+        })
+
+        extra_body = {"thinking": {"type": "enabled" if thinking_mode else "disabled"}}
+
+        response = await deepseek_client.chat.completions.create(
+            model=settings.DEEPSEEK_GENERATION_MODEL,
+            messages=messages,
+            stream=True,
+            extra_body=extra_body,
+            **({"reasoning_effort": "high"} if thinking_mode else {})
+        )
+
+        has_yielded_thinking_header = False
+        try:
+            async for chunk in response:
+                delta = chunk.choices[0].delta
+                reasoning = getattr(delta, "reasoning_content", None)
+                if thinking_mode and reasoning:
+                    if not has_yielded_thinking_header:
+                        yield "<details><summary>Thinking Process</summary>\n"
+                        has_yielded_thinking_header = True
+                    yield reasoning
+                    continue
+
+                text = delta.content
+                if text:
+                    if has_yielded_thinking_header:
+                        yield "\n</details>\n\n"
+                        has_yielded_thinking_header = False
+                    yield text
+        finally:
+            if has_yielded_thinking_header:
+                yield "\n</details>\n\n"
+
+    else:
+        print("[Agent] DeepSeek API not configured. Falling back to Gemini...")
+        contents = []
+        if history:
+            for msg in history:
+                contents.append(
+                    types.Content(
+                        role=msg.role,
+                        parts=[types.Part.from_text(text=msg.text)]
                     )
                 )
-            ],
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text=(
+                            f"Latest user question:\n{user_query}\n\n"
+                            f"Retrieved document context:\n{retrieved_context}\n\n"
+                            "Answer the latest user question using the retrieved context. "
+                            "For multi-page questions, synthesize across every relevant "
+                            "evidence block before concluding. If table evidence is present "
+                            "and the user asks for tabular information, render a valid "
+                            "Markdown table. Cite pages for document-supported facts."
+                        )
+                    )
+                ],
+            )
         )
-    )
 
-    print("[Agent] Synthesizing final answer from retrieved context...")
-    final_response = client.models.generate_content_stream(
-        model=settings.GEMINI_GENERATION_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-    )
-    for chunk in final_response:
-        text = _extract_text_from_response(chunk)
-        if text:
-            yield text
+        final_response = client.models.generate_content_stream(
+            model=settings.GEMINI_GENERATION_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+        )
+        for chunk in final_response:
+            text = _extract_text_from_response(chunk)
+            if text:
+                yield text
+

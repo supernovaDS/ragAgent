@@ -10,14 +10,13 @@ from app.api import router as api_router
 
 logger = logging.getLogger(__name__)
 
-# Fix #5: rate limiting — keyed by IP, overridable per-endpoint
+# rate limiting — keyed by IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 app = FastAPI(
     title="Agentic Multimodal RAG API",
     description="Powered by Gemini 3.1 Flash-Lite and Gemini Embedding 2",
     version="1.0.0",
-    # Hide interactive docs in production
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
 )

@@ -33,6 +33,7 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [isFetching, setIsFetching] = useState(false);
+  const [thinkingEnabled, setThinkingEnabled] = useState(true);
   const messagesEndRef = useRef(null);
   const authFetch = useAuthFetch();
   const { user } = useUser();
@@ -124,7 +125,7 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
     try {
       const response = await authFetch(`/api/chats/${chatId}/message`, {
         method: 'POST',
-        body: JSON.stringify({ query })
+        body: JSON.stringify({ query, thinking_mode: thinkingEnabled })
       });
 
       const reader = response.body.getReader();
@@ -200,7 +201,19 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="input-container">
+      <div className="input-container" style={{ flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', width: '100%', maxWidth: '48rem', paddingLeft: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', userSelect: 'none' }}>
+            <input
+              type="checkbox"
+              checked={thinkingEnabled}
+              onChange={(e) => setThinkingEnabled(e.target.checked)}
+              disabled={isLoading || isTempChat(chatId)}
+              style={{ cursor: 'pointer', accentColor: 'var(--accent-color)' }}
+            />
+            Thinking Mode
+          </label>
+        </div>
         <form className="input-box" onSubmit={handleSubmit}>
           <textarea
             className="chat-input"

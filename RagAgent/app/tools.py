@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 TOKEN_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_\-./]*")
 IMAGE_KEYWORDS = {
     "image", "images", "logo", "diagram", "chart", "figure", "illustration",
-    "photo", "picture", "pictures", "map", "draw", "drawing", "visual",
-    "schematic", "show", "see", "look"
+    "photo", "photos", "photograph", "photographs", "pic", "pics",
+    "picture", "pictures", "map", "draw", "drawing", "visual",
+    "schematic", "show", "see", "look", "jpg", "jpeg", "png", "webp"
 }
 TABLE_KEYWORDS = {
     "table", "tables", "tabular", "row", "rows", "column", "columns",
@@ -264,8 +265,8 @@ def _merge_and_rerank(
         content_boost = 0.03 if content else 0.0
         
         # Give images a baseline boost to compete with text, plus a large boost if the query has image intent
-        image_boost = 0.10 if has_image else 0.0
-        image_intent_boost = 0.25 if (has_image and has_image_intent) else 0.0
+        image_boost = 0.15 if has_image else 0.0
+        image_intent_boost = 0.50 if (has_image and has_image_intent) else 0.0
         table_boost = 0.12 if is_table else 0.0
         table_intent_boost = 0.22 if (is_table and has_table_intent) else 0.0
 
@@ -302,7 +303,7 @@ def _candidate_from_record(record: Any, score: float, context_role: str) -> dict
     }
 
 
-def _expand_with_neighbor_context(reranked: list[dict], records: list[Any]) -> list[dict]:
+def _expand_with_neighbor_context(reranked: list[dict], records: list[Any], query: str = "") -> list[dict]:
     """Add nearby page chunks so multi-page answers have enough surrounding context."""
     if not reranked or settings.CONTEXT_NEIGHBOR_PAGES <= 0:
         return reranked
@@ -318,20 +319,44 @@ def _expand_with_neighbor_context(reranked: list[dict], records: list[Any]) -> l
             continue
         by_doc_page.setdefault((document_id, page_number), []).append(record)
 
+    has_image_intent = _has_any(query, IMAGE_KEYWORDS)
+    has_table_intent = _has_any(query, TABLE_KEYWORDS)
+
     def source_priority(record: Any) -> tuple[int, int]:
         payload = record.payload or {}
         source = payload.get("source", "")
         entity_type = payload.get("entity_type", "")
+        
+        # Default priorities
+        p_table = 0
+        p_text = 1
+        p_ocr = 2
+        p_img_text = 3
+        p_image = 4
+        
+        if has_image_intent:
+            p_image = 0
+            p_img_text = 1
+            p_table = 2
+            p_text = 3
+            p_ocr = 4
+        elif has_table_intent:
+            p_table = 0
+            p_text = 1
+            p_ocr = 2
+            p_img_text = 3
+            p_image = 4
+            
         if entity_type == "table" or source == "table":
-            priority = 0
+            priority = p_table
         elif source == "pdf_text":
-            priority = 1
+            priority = p_text
         elif source == "page_ocr":
-            priority = 2
+            priority = p_ocr
         elif source == "image_text":
-            priority = 3
+            priority = p_img_text
         elif entity_type == "image":
-            priority = 4
+            priority = p_image
         else:
             priority = 5
         return priority, int(payload.get("chunk_index") or 0)
@@ -355,16 +380,29 @@ def _expand_with_neighbor_context(reranked: list[dict], records: list[Any]) -> l
                 continue
 
             page_records = sorted(by_doc_page.get((document_id, page), []), key=source_priority)
-            for record in page_records[: settings.CONTEXT_CHUNKS_PER_PAGE]:
+            
+            chunks_limit = settings.CONTEXT_CHUNKS_PER_PAGE
+            if has_image_intent:
+                chunks_limit = max(chunks_limit, 8)
+                
+            for record in page_records[: chunks_limit]:
                 record_id = str(record.id)
                 if record_id in selected_ids:
                     continue
                 selected_ids.add(record_id)
-                selected.append(_candidate_from_record(record, anchor["final_score"] * 0.72, "neighbor_page"))
+                
+                # Boost neighbor page score if it's an image/figure and there is image intent
+                payload_rec = record.payload or {}
+                is_img = payload_rec.get("entity_type") == "image" or payload_rec.get("image_url") is not None
+                score_factor = 1.15 if (is_img and has_image_intent) else 0.72
+                
+                selected.append(_candidate_from_record(record, anchor["final_score"] * score_factor, "neighbor_page"))
 
                 if len(selected) >= settings.EXPANDED_CONTEXT_LIMIT:
+                    selected.sort(key=lambda item: item["final_score"], reverse=True)
                     return selected
 
+    selected.sort(key=lambda item: item["final_score"], reverse=True)
     return selected
 
 
@@ -447,7 +485,7 @@ def _llm_rerank_candidates(query: str, candidates: list[dict]) -> list[dict]:
     prompt = (
         "You are reranking retrieved PDF evidence for a RAG answer. Select only "
         "evidence blocks that help answer the user question. Prefer exact values, "
-        "tables, and pages that complete a multi-page answer. Return strict JSON "
+        "tables, images/figures if requested by the user, and pages that complete a multi-page answer. Return strict JSON "
         "with this shape: {\"selected_ids\": [\"id1\"], \"needs_more_context\": false}. "
         "Do not invent ids.\n\n"
         f"Question:\n{query}\n\n"
@@ -521,6 +559,8 @@ def search_knowledge_base_direct(chat_id: str, query: str, raw_query: str | None
     lexical_records = _scroll_chat_points(chat_id, settings.LEXICAL_SCAN_LIMIT)
     merged_lexical_scores: dict[str, float] = {}
 
+    has_image_intent = _has_any(raw_query or query, IMAGE_KEYWORDS)
+
     for q in queries_to_search:
         logger.info(f"[Tool Execution] Hybrid search for: '{q}' in chat '{chat_id}'")
 
@@ -537,6 +577,33 @@ def search_knowledge_base_direct(chat_id: str, query: str, raw_query: str | None
                 point_id = str(point.id)
                 if point_id not in all_vector_points or point.score > all_vector_points[point_id].score:
                     all_vector_points[point_id] = point
+
+            # If user query has image intent, perform an additional vector query focused purely on images
+            if has_image_intent:
+                image_filter = qdrant_client.models.Filter(
+                    must=[
+                        qdrant_client.models.FieldCondition(
+                            key="chat_id",
+                            match=qdrant_client.models.MatchValue(value=chat_id),
+                        ),
+                        qdrant_client.models.FieldCondition(
+                            key="entity_type",
+                            match=qdrant_client.models.MatchValue(value="image"),
+                        )
+                    ]
+                )
+                image_results = db.client.query_points(
+                    collection_name=settings.QDRANT_COLLECTION_NAME,
+                    query=query_vector,
+                    limit=15,
+                    query_filter=image_filter,
+                ).points
+                for point in image_results:
+                    point_id = str(point.id)
+                    point.score = max(point.score, 0.0) + 0.15 # Add retrieval boost
+                    if point_id not in all_vector_points or point.score > all_vector_points[point_id].score:
+                        all_vector_points[point_id] = point
+
         except Exception:
             logger.exception("Vector search failed; falling back to lexical results only")
 
@@ -551,7 +618,7 @@ def search_knowledge_base_direct(chat_id: str, query: str, raw_query: str | None
         query=raw_query or query,
     )
 
-    expanded_candidates = _expand_with_neighbor_context(reranked, lexical_records)
+    expanded_candidates = _expand_with_neighbor_context(reranked, lexical_records, query=raw_query or query)
     intelligence_mode = "complex_rerank" if _evidence_needs_rerank(raw_query or query, expanded_candidates) else "deterministic"
     final_candidates = _llm_rerank_candidates(raw_query or query, expanded_candidates)
     final_candidates = final_candidates[: settings.EXPANDED_CONTEXT_LIMIT]

@@ -40,7 +40,7 @@ def get_multimodal_embeddings_batch(contents_list: list[str]) -> list[list[float
     if not contents_list:
         return []
     
-    # Wrap each string in a separate types.Content object so Gemini generates an embedding for each document
+    
     wrapped_contents = [
         types.Content(parts=[types.Part.from_text(text=text)])
         for text in contents_list
@@ -262,7 +262,6 @@ def _process_single_image(
     chat_id: str,
 ) -> dict | None:
     try:
-        # Fix #4: scope uploads into a user folder for access isolation
         folder = f"ragagent/{user_id}"
         public_id = f"{doc_id}_page{page_number}_img{img_index}"
         upload_result = cloudinary.uploader.upload(
@@ -339,7 +338,7 @@ def ingest_pdf(file_bytes: bytes, filename: str, user_id: str, chat_id: str) -> 
                     except Exception:
                         logger.exception(f"Failed to render page {page_number} for OCR")
                 
-                # 2. Image extraction on main thread and submit to worker
+                # Image extraction on main thread and submit to worker
                 try:
                     image_list = page.get_images(full=True)
                 except Exception:

@@ -17,6 +17,7 @@ from app.auth import get_current_user
 from app.ingest import ingest_pdf
 from app.agent import chat_with_pdf_agent
 from app.tools import search_knowledge_base_direct
+from app.deepseek_client import deepseek_client
 from app.config import settings
 from app.genai_client import client
 from app.utils import call_with_retry
@@ -38,7 +39,7 @@ def _sanitize_filename(raw_name: str) -> str:
         name = stem[:MAX_FILENAME_LENGTH - len(ext)] + ext
     return name or "upload.pdf"
 
-# --- Shared helpers (Fix #17: deduplicated vector deletion) ---
+
 
 def _delete_vectors_by(field: str, value: str):
     """Delete Qdrant vectors matching a single field condition."""
@@ -122,7 +123,7 @@ def delete_document(doc_id: str, background_tasks: BackgroundTasks, user_id: str
     db.commit()
     return {"status": "success"}
 
-# --- Upload (Fix #8: chunked read, Fix #9: async thread, Fix #7: sanitized filename) ---
+# --- Upload ---
 
 @router.post("/chats/{chat_id}/upload")
 async def upload_document(
@@ -138,7 +139,7 @@ async def upload_document(
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
     
-    # Fix #8: chunked read with early abort to prevent OOM
+
     chunks, total = [], 0
     while True:
         chunk = await file.read(1024 * 1024)  # 1MB at a time
@@ -150,10 +151,10 @@ async def upload_document(
         chunks.append(chunk)
     file_bytes = b"".join(chunks)
     
-    # Fix #7: sanitize user-controlled filename
+
     safe_filename = _sanitize_filename(file.filename)
     
-    # Fix #9: run heavy sync ingestion in a thread so we don't block the event loop
+  
     doc_id = await asyncio.to_thread(ingest_pdf, file_bytes, safe_filename, user_id, chat_id)
     
     # store metadata
@@ -169,7 +170,6 @@ def get_messages(chat_id: str, user_id: str = Depends(get_current_user), db: Ses
         raise HTTPException(status_code=404, detail="Chat not found")
     return db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.created_at.asc(), Message.id.asc()).all()
 
-# Fix #2: debug endpoint gated behind DEBUG flag
 if settings.DEBUG:
     @router.get("/chats/{chat_id}/debug/search")
     def debug_search(
@@ -188,7 +188,7 @@ if settings.DEBUG:
         }
 
 @router.post("/chats/{chat_id}/message")
-def send_message(
+async def send_message(
     chat_id: str, 
     request: ChatRequest, 
     user_id: str = Depends(get_current_user), 
@@ -203,14 +203,26 @@ def send_message(
         chat.title = "Generating..."
         db.commit()
         try:
-            res = call_with_retry(
-                client.models.generate_content,
-                model=settings.GEMINI_GENERATION_MODEL,
-                contents=f"Generate a 3-word title for a conversation that begins with: '{request.query}'",
-                config=types.GenerateContentConfig(system_instruction="Only return the 3 words, nothing else.")
-            )
-            chat.title = res.text.strip().replace('"', '')
-            db.commit()
+            if deepseek_client:
+                res = await deepseek_client.chat.completions.create(
+                    model=settings.DEEPSEEK_GENERATION_MODEL,
+                    messages=[
+                        {"role": "system", "content": "Only return the 3 words, nothing else."},
+                        {"role": "user", "content": f"Generate a 3-word title for a conversation that begins with: '{request.query}'"}
+                    ],
+                    extra_body={"thinking": {"type": "disabled"}}
+                )
+                chat.title = res.choices[0].message.content.strip().replace('"', '')
+                db.commit()
+            else:
+                res = call_with_retry(
+                    client.models.generate_content,
+                    model=settings.GEMINI_GENERATION_MODEL,
+                    contents=f"Generate a 3-word title for a conversation that begins with: '{request.query}'",
+                    config=types.GenerateContentConfig(system_instruction="Only return the 3 words, nothing else.")
+                )
+                chat.title = res.text.strip().replace('"', '')
+                db.commit()
         except Exception as e:
             logger.warning(f"Failed to auto-title chat: {e}")
             chat.title = request.query[:40] or "Untitled Chat"
@@ -223,11 +235,16 @@ def send_message(
     db.add(user_msg)
     db.commit()
     
-    # Fix #11: use proper logging with tracebacks
-    def generate():
+
+    async def generate():
         full_response = ""
         try:
-            for chunk in chat_with_pdf_agent(user_query=request.query, history=history, chat_id=chat_id):
+            async for chunk in chat_with_pdf_agent(
+                user_query=request.query, 
+                history=history, 
+                chat_id=chat_id, 
+                thinking_mode=request.thinking_mode
+            ):
                 full_response += chunk
                 yield chunk
         except Exception as e:

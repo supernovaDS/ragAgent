@@ -26,3 +26,4 @@ class ChatSchema(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str = Field(..., description="The user's new message.")
+    thinking_mode: Optional[bool] = Field(True, description="Whether to enable thinking mode.")

@@ -12,3 +12,4 @@ PyJWT
 langchain-text-splitters
 pydantic
 slowapi>=0.1.9
+openai>=1.0.0
