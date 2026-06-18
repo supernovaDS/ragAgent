@@ -144,6 +144,9 @@ const ChatInterface = ({ chatId, onTitleUpdate }) => {
         
         accumulatedText += decoder.decode(value, { stream: true });
         setStreamingMessage(accumulatedText);
+
+        // Yield control to the browser paint thread to prevent UI lockup on mobile devices
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
 
       setIsLoading(false);
