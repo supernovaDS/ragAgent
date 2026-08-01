@@ -17,6 +17,64 @@ When a user uploads a PDF document to a chat session, the following sequence occ
    * Gemini is used to generate a rich descriptive caption (alt-text) for each uploaded image.
 6. **Vectorization & Upserting**: The extracted text chunks and image descriptions are vectorized using Gemini Embedding 2 (producing a 3072-dimensional vector representation). These vectors, alongside metadata payloads (e.g., `chat_id`, `document_id`, `text_content`, `image_url`, `page_number`, `source`), are then batch-upserted to Qdrant Cloud.
 
+### Ingestion Data Flow Sequence Diagram (Write Path)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / Client UI
+    participant API as api.py (FastAPI)
+    participant Ingest as ingest.py (Parser)
+    participant Gemini as Gemini API (OCR/Embeddings)
+    participant Cloudinary as Cloudinary (CDN Storage)
+    participant DB as Supabase PostgreSQL
+    participant Qdrant as Qdrant Cloud (Vectors)
+
+    User->>API: Upload PDF File
+    activate API
+    
+    rect rgb(240, 240, 240)
+        Note over API, DB: Phase 1: Metadata Validation & DB Creation
+        API->>DB: Save Document Record & initial metadata (SQLAlchemy)
+        DB-->>API: Document ID confirmed
+    end
+
+    rect rgb(245, 245, 255)
+        Note over API, Ingest: Phase 2: PDF Parsing & Asset Processing
+        API->>Ingest: run_ingestion_pipeline(file_path, doc_id)
+        activate Ingest
+        
+        Note over Ingest: Parse PDF pages via PyMuPDF (fitz)
+        
+        alt Page is Searchable
+            Ingest->>Ingest: Extract native text and markdown tables
+        else Page is Scanned (OCR Fallback)
+            Ingest->>Gemini: Send page screenshot for OCR processing
+            Gemini-->>Ingest: Return structured markdown text
+        end
+
+        loop For each embedded image
+            Ingest->>Cloudinary: Upload raw image
+            Cloudinary-->>Ingest: Return public CDN image URL
+            Ingest->>Gemini: Request descriptive caption (image + context)
+            Gemini-->>Ingest: Return textual image description
+        end
+    end
+
+    rect rgb(240, 250, 240)
+        Note over Ingest, Qdrant: Phase 3: Embedding & Indexing
+        Ingest->>Gemini: Vectorize text chunks & image descriptions
+        Gemini-->>Ingest: Return 3072-dimensional embeddings
+        
+        Ingest->>Qdrant: Batch-upsert vectors + payload metadata
+        Qdrant-->>Ingest: Upsert confirmation
+        deactivate Ingest
+    end
+
+    API-->>User: Upload and indexing successful (200 OK)
+    deactivate API
+```
+
 ---
 
 ## Retrieval & Generation Pipeline Architecture (Read Path)
@@ -48,48 +106,54 @@ sequenceDiagram
     box "External Services"
         participant Qdrant as Qdrant Cloud (Vectors)
         participant LLM as DeepSeek / Gemini Fallback
-        participant DB as PostgreSQL
+        participant DB as Supabase PostgreSQL
     end
 
-    User->>API: POST /api/chats/{chat_id}/message [query, thinking_mode]
-    activate API
-    
-    Note over API: Check / Auto-title Chat Session (DeepSeek/Gemini)
-    API->>Tools: search_knowledge_base_direct(chat_id, query)
-    activate Tools
-    Note over Tools: Generate Expanded Query Candidates
-    
-    par Vector Search
-        Tools->>Qdrant: query_points() [Filtered by chat_id]
-        Qdrant-->>Tools: Semantic Vector Candidates
-    and Lexical Search
-        Tools->>Qdrant: scroll() [Retrieve all chat content]
-        Qdrant-->>Tools: Raw Payloads
-        Note over Tools: Compute BM25 scores locally
+    rect rgb(240, 240, 240)
+        Note over User, API: Phase 1: Search & Context Retrieval
+        User->>API: POST /api/chats/{chat_id}/message [query, thinking_mode]
+        activate API
+        
+        Note over API: Check / Auto-title Chat Session (DeepSeek/Gemini)
+        API->>Tools: search_knowledge_base_direct(chat_id, query)
+        activate Tools
+        Note over Tools: Generate Expanded Query Candidates
+        
+        par Dense Semantic Search
+            Tools->>Qdrant: query_points() [Filtered by chat_id]
+            Qdrant-->>Tools: Semantic Vector Candidates
+        and Sparse Lexical Search
+            Tools->>Qdrant: scroll() [Retrieve all chat content]
+            Qdrant-->>Tools: Raw Payloads
+            Note over Tools: Compute BM25 scores locally
+        end
+
+        Note over Tools: 1. Merge scores using RRF<br/>2. Apply image & table intent boosts<br/>3. Expand with neighbor page chunks<br/>4. Rerank using LLM (if complex query)
+        Tools-->>API: Formatted Context Evidence Chunks
+        deactivate Tools
     end
 
-    Note over Tools: Merge & Rerank (Weighted RRF + Intent Boosts)
-    Note over Tools: Expand Context with Neighbor Pages
-    Note over Tools: Adaptive LLM Reranking (if query is complex)
-    Tools-->>API: Formatted Context Evidence Chunks
-    deactivate Tools
-
-    API->>Agent: chat_with_pdf_agent(user_query, history, chat_id, thinking_mode)
-    activate Agent
-    Agent->>LLM: stream completion (messages, thinking options)
-    activate LLM
-    
-    loop Streaming response chunks
-        LLM-->>Agent: Raw response chunk (reasoning_content / content)
-        Agent-->>API: Yield parsed token (wraps CoT in details tags)
-        API-->>User: Stream token via SSE (StreamingResponse)
+    rect rgb(245, 245, 255)
+        Note over API, LLM: Phase 2: LLM Inference & Token Streaming
+        API->>Agent: chat_with_pdf_agent(user_query, history, chat_id, thinking_mode)
+        activate Agent
+        Agent->>LLM: Stream completion (messages, context, thinking options)
+        activate LLM
+        
+        loop Stream response chunk-by-chunk
+            LLM-->>Agent: Raw response chunk (reasoning_content / content)
+            Agent-->>API: Yield parsed token (wraps CoT in details tags)
+            API-->>User: Stream token via SSE (StreamingResponse)
+        end
+        deactivate LLM
+        deactivate Agent
     end
-    
-    deactivate LLM
-    deactivate Agent
-    
-    API->>DB: Post-Stream: Save assistant response
-    deactivate API
+
+    rect rgb(240, 250, 240)
+        Note over API, DB: Phase 3: Persistence
+        API->>DB: Post-Stream: Save assistant response
+        deactivate API
+    end
 ```
 
 ---
