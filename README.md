@@ -26,7 +26,7 @@ graph TD
     BE -->|Store Metadata| DB[(Supabase PostgreSQL)]
     
     PDF -->|Upload Images| Cloudinary[(Cloudinary CDN)]
-    PDF -->|OCR & Image Description| Gemini[Gemini 1.5/2.0 API]
+    PDF -->|OCR & Image Description| Gemini[Gemini API]
     
     PDF -->|Store Embeddings & Metadata| Qdrant[(Qdrant Vector DB)]
     
@@ -34,6 +34,12 @@ graph TD
     BE -->|Reasoning & Completion| DeepSeek[DeepSeek API]
     BE -->|Completion Fallback| Gemini
 ```
+
+### 🗄️ Database Schema
+
+The system utilizes a PostgreSQL database (Supabase) to store and manage chat sessions, message histories, and document metadata. The schema mapping is shown below:
+
+![Database Schema](./database_schema.png)
 
 ---
 
