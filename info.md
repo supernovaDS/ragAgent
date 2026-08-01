@@ -11,37 +11,24 @@ The **Write Path** is the document ingestion engine. Its job is to take an unstr
 ### Detailed Step-by-Step Breakdown
 
 1. **Metadata Persistence & Validation**:
-   * **What happens**: The moment a user selects a file in the UI, FastAPI (`api.py`) validates the upload (checking file type and size limits). It then writes a new document record to **Supabase PostgreSQL** using **SQLAlchemy ORM** (`models.py`).
-   * **Why it matters**: It registers the document in your relational database first, linking the `document_id` to the current `chat_id`. Because of PostgreSQL's **Cascading Delete** constraints, if a user deletes a chat session later, all associated document metadata and message records are automatically purged without leaving orphaned data.
+   * **What Happens**: FastAPI (`api.py`) validates the file type/size limits and executes a synchronous write of document records to **Supabase PostgreSQL** via **SQLAlchemy ORM** (`models.py`).
+   * **Why It Matters**: Registering relational metadata first establishes a strict foreign key link (`document_id` → `chat_id`). Thanks to PostgreSQL **Cascading Deletes**, purging a chat session automatically cleans up all associated document records and messages, preventing orphaned data in SQL.
 
 2. **PDF Parsing & Native Text Extraction**:
-   * **What happens**: In `ingest.py`, the backend opens the raw PDF using **PyMuPDF (`fitz`)**, a high-performance C-based Python library. It iterates through every page and attempts to pull out native selectable text layers and font structures.
-   * **Why it matters**: Reading native PDF text is instantaneous and costs **0 API credits**. For standard digital PDFs, this extracts 90%+ of the content immediately.
+   * **What Happens**: `ingest.py` opens the PDF using **PyMuPDF (`fitz`)** and extracts selectable text layers and structured tables page by page.
+   * **Why It Matters**: Extracting native PDF text is near-instantaneous and consumes **zero API tokens**, rapidly indexing 90%+ of digital PDF content without incurring AI processing costs.
 
 3. **OCR Fallback (Handling Scanned / Image PDFs)**:
-   * **What happens**: If a PDF page is a scanned document, a scanned form, or contains less than 80 characters of native text, standard text extraction fails. 
-   * **The Solution**: The pipeline detects this low character count and triggers an **OCR Fallback**:
-     1. It renders a high-resolution screenshot of the PDF page.
-     2. It sends the screenshot to the **Gemini Vision API**.
-     3. Gemini reads the visual layout, converting scanned handwriting, multi-column text, complex headings, and scanned tables directly into clean **Markdown text**.
+   * **What Happens**: If a page contains fewer than 80 characters of native text, the pipeline flags it as a scanned/visual page, captures a high-resolution screenshot, and passes it to the **Gemini Vision API**.
+   * **Why It Matters**: Standard parsers fail completely on scanned documents, forms, and flattened PDFs. Using vision-based OCR restores scanned text, multi-column layouts, and tables into clean Markdown, guaranteeing near-100% recall even on image-based documents.
 
 4. **Image Extraction & AI Alt-Text Description**:
-   * **What happens**: PDFs often contain critical visual diagrams, flowcharts, graphs, and figures. Vector search cannot search raw image pixels directly, so your system converts visual graphics into searchable text:
-     1. **Extraction**: PyMuPDF extracts embedded raster graphics from the page stream.
-     2. **CDN Upload**: The raw image is uploaded to **Cloudinary Object Storage** with a unique key: `[doc_id]_page[num]_img[idx]` (e.g., `doc123_page2_img0`). Cloudinary returns a public HTTPS CDN URL.
-     3. **AI Captioning**: The image is passed to **Gemini Vision** to generate a rich, context-aware descriptive caption (alt-text)—for example: *"Bar chart illustrating Q4 2025 revenue growth peaking at $4.2M"*.
+   * **What Happens**: Embedded raster graphics (charts, diagrams, flowcharts) are extracted by PyMuPDF, uploaded to **Cloudinary CDN** with a structured key (`[doc_id]_page[num]_img[idx]`), and captioned with descriptive alt-text by **Gemini Vision**.
+   * **Why It Matters**: Vector databases cannot search raw image pixels. Converting graphics into rich textual descriptions allows visual information to be indexed semantically, while hosting the raw assets on Cloudinary enables real-time image lightbox rendering in the UI.
 
 5. **Vectorization & Upserting to Qdrant Cloud**:
-   * **What happens**: All extracted text chunks, structured markdown tables, and AI-generated image captions are converted into numerical representations (vectors):
-     1. **Embedding**: Text and captions are passed to Google's embedding model (`text-embedding-004`), which generates a **3072-dimensional vector** for each chunk.
-     2. **Metadata Payload Creation**: Each vector is paired with a rich JSON metadata payload:
-        * `chat_id`: Ties the vector to the specific user chat session.
-        * `document_id` & `page_number`: Enables page-level citation badges.
-        * `text_content`: The raw text or markdown table.
-        * `image_url`: The Cloudinary HTTPS link (if it's an image payload).
-        * `entity_type`: Categorizes whether it is `"text"`, `"table"`, or `"image"`.
-        * `source`: Distinguishes `"pdf_text"`, `"page_ocr"`, or `"image_text"`.
-     3. **Batch Upsert**: These vectors and payloads are batch-uploaded to **Qdrant Cloud**, where they are indexed using an HNSW (Hierarchical Navigable Small World) graph for ultra-fast semantic similarity search.
+   * **What Happens**: Text chunks, Markdown tables, and image captions are passed to Google's `text-embedding-004` model to generate **3072-dimensional vectors**, which are batch-upserted to **Qdrant Cloud** along with metadata payloads (`chat_id`, `document_id`, `image_url`, `page_number`, `entity_type`).
+   * **Why It Matters**: High-dimensional vectors enable deep semantic understanding during retrieval. Attaching rich JSON metadata to each vector enables fast chat-level filtering and granular page-level citation badges in the final RAG answer.
 
 ### Summary of Component Architecture
 | Component | Technology | Purpose |
