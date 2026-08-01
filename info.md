@@ -6,16 +6,52 @@ It lets users create chat sessions , upload PDF documents and interact with an A
 # SYSTEM ARCHITECTURE
 
 ## Ingestion Pipeline Architecture (Write Path)
-When a user uploads a PDF document to a chat session, the following sequence occurs:
+The **Write Path** is the document ingestion engine. Its job is to take an unstructured PDF file (which might contain text, scanned pages, tables, and complex diagrams), extract all useful knowledge, convert it into searchable 3D mathematical vectors, and store it so the AI agent can retrieve it later.
 
-1. **Metadata Persistence & Validation**: The FastAPI backend handles the initial upload trigger within `api.py`, performing validation before executing a synchronous write of document records to Supabase PostgreSQL utilizing SQLAlchemy ORM (`models.py`).
-2. **PDF Parsing**: The document is processed in `ingest.py` using PyMuPDF (`fitz`).
-3. **Text Extraction**: It attempts to extract native textual content from each page.
-4. **OCR Fallback**: If a page is detected to contain scanned images or minimal selectable text, it calls Gemini OCR to parse tables, headings, and visual text structures from a page screenshot.
-5. **Image Extraction & Description**: Any embedded graphics/charts on the pages are extracted as separate images:
-   * Images are uploaded to Cloudinary under a strict naming convention `[doc_id]_page[num]_img[idx]`.
-   * Gemini is used to generate a rich descriptive caption (alt-text) for each uploaded image.
-6. **Vectorization & Upserting**: The extracted text chunks and image descriptions are vectorized using Gemini Embedding 2 (producing a 3072-dimensional vector representation). These vectors, alongside metadata payloads (e.g., `chat_id`, `document_id`, `text_content`, `image_url`, `page_number`, `source`), are then batch-upserted to Qdrant Cloud.
+### Detailed Step-by-Step Breakdown
+
+1. **Metadata Persistence & Validation**:
+   * **What happens**: The moment a user selects a file in the UI, FastAPI (`api.py`) validates the upload (checking file type and size limits). It then writes a new document record to **Supabase PostgreSQL** using **SQLAlchemy ORM** (`models.py`).
+   * **Why it matters**: It registers the document in your relational database first, linking the `document_id` to the current `chat_id`. Because of PostgreSQL's **Cascading Delete** constraints, if a user deletes a chat session later, all associated document metadata and message records are automatically purged without leaving orphaned data.
+
+2. **PDF Parsing & Native Text Extraction**:
+   * **What happens**: In `ingest.py`, the backend opens the raw PDF using **PyMuPDF (`fitz`)**, a high-performance C-based Python library. It iterates through every page and attempts to pull out native selectable text layers and font structures.
+   * **Why it matters**: Reading native PDF text is instantaneous and costs **0 API credits**. For standard digital PDFs, this extracts 90%+ of the content immediately.
+
+3. **OCR Fallback (Handling Scanned / Image PDFs)**:
+   * **What happens**: If a PDF page is a scanned document, a scanned form, or contains less than 80 characters of native text, standard text extraction fails. 
+   * **The Solution**: The pipeline detects this low character count and triggers an **OCR Fallback**:
+     1. It renders a high-resolution screenshot of the PDF page.
+     2. It sends the screenshot to the **Gemini Vision API**.
+     3. Gemini reads the visual layout, converting scanned handwriting, multi-column text, complex headings, and scanned tables directly into clean **Markdown text**.
+
+4. **Image Extraction & AI Alt-Text Description**:
+   * **What happens**: PDFs often contain critical visual diagrams, flowcharts, graphs, and figures. Vector search cannot search raw image pixels directly, so your system converts visual graphics into searchable text:
+     1. **Extraction**: PyMuPDF extracts embedded raster graphics from the page stream.
+     2. **CDN Upload**: The raw image is uploaded to **Cloudinary Object Storage** with a unique key: `[doc_id]_page[num]_img[idx]` (e.g., `doc123_page2_img0`). Cloudinary returns a public HTTPS CDN URL.
+     3. **AI Captioning**: The image is passed to **Gemini Vision** to generate a rich, context-aware descriptive caption (alt-text)—for example: *"Bar chart illustrating Q4 2025 revenue growth peaking at $4.2M"*.
+
+5. **Vectorization & Upserting to Qdrant Cloud**:
+   * **What happens**: All extracted text chunks, structured markdown tables, and AI-generated image captions are converted into numerical representations (vectors):
+     1. **Embedding**: Text and captions are passed to Google's embedding model (`text-embedding-004`), which generates a **3072-dimensional vector** for each chunk.
+     2. **Metadata Payload Creation**: Each vector is paired with a rich JSON metadata payload:
+        * `chat_id`: Ties the vector to the specific user chat session.
+        * `document_id` & `page_number`: Enables page-level citation badges.
+        * `text_content`: The raw text or markdown table.
+        * `image_url`: The Cloudinary HTTPS link (if it's an image payload).
+        * `entity_type`: Categorizes whether it is `"text"`, `"table"`, or `"image"`.
+        * `source`: Distinguishes `"pdf_text"`, `"page_ocr"`, or `"image_text"`.
+     3. **Batch Upsert**: These vectors and payloads are batch-uploaded to **Qdrant Cloud**, where they are indexed using an HNSW (Hierarchical Navigable Small World) graph for ultra-fast semantic similarity search.
+
+### Summary of Component Architecture
+| Component | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Relational DB** | PostgreSQL (Supabase) + SQLAlchemy | Track chat sessions, document records, and message history with cascading deletes. |
+| **PDF Parser** | PyMuPDF (`fitz`) | Fast native text and embedded image extraction. |
+| **OCR & Captioning** | Gemini Vision API | Fallback for scanned pages & generating descriptive text for charts/diagrams. |
+| **Image CDN** | Cloudinary | Hosts extracted images so they can be rendered in the frontend chat bubbles via CDN URLs. |
+| **Embeddings** | Gemini Embedding 2 (3072d) | Turns text/captions into mathematical vector representations. |
+| **Vector DB** | Qdrant Cloud | Indexes and executes 3072-dimensional semantic vector queries with metadata filtering. |
 
 ### Ingestion Data Flow (Write Path)
 
