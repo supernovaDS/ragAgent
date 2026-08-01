@@ -19,11 +19,11 @@ The **Write Path** is the document ingestion engine. Its job is to take an unstr
    * **Why It Matters**: Extracting native PDF text is near-instantaneous and consumes **zero API tokens**, rapidly indexing 90%+ of digital PDF content without incurring AI processing costs.
 
 3. **OCR Fallback (Handling Scanned / Image PDFs)**:
-   * **What Happens**: If a page contains fewer than 80 characters of native text, the pipeline flags it as a scanned/visual page, captures a high-resolution screenshot, and passes it to the **Gemini Vision API**.
-   * **Why It Matters**: Standard parsers fail completely on scanned documents, forms, and flattened PDFs. Using vision-based OCR restores scanned text, multi-column layouts, and tables into clean Markdown, guaranteeing near-100% recall even on image-based documents.
+   * **What Happens**: If a page contains fewer than 80 characters of native text, the pipeline flags it as a scanned/visual page, captures a high-resolution screenshot, and passes it to **Gemini (`gemini-3.1-flash-lite`)**.
+   * **Why It Matters**: Standard parsers fail completely on scanned documents, forms, and flattened PDFs. Using Gemini's native multimodal vision capabilities restores scanned text, multi-column layouts, and tables into clean Markdown, guaranteeing near-100% recall even on image-based documents.
 
 4. **Image Extraction & AI Alt-Text Description**:
-   * **What Happens**: Embedded raster graphics (charts, diagrams, flowcharts) are extracted by PyMuPDF, uploaded to **Cloudinary CDN** with a structured key (`[doc_id]_page[num]_img[idx]`), and captioned with descriptive alt-text by **Gemini Vision**.
+   * **What Happens**: Embedded raster graphics (charts, diagrams, flowcharts) are extracted by PyMuPDF, uploaded to **Cloudinary CDN** with a structured key (`[doc_id]_page[num]_img[idx]`), and captioned with descriptive alt-text by **Gemini (`gemini-3.1-flash-lite`)**.
    * **Why It Matters**: Vector databases cannot search raw image pixels. Converting graphics into rich textual descriptions allows visual information to be indexed semantically, while hosting the raw assets on Cloudinary enables real-time image lightbox rendering in the UI.
 
 5. **Vectorization & Upserting to Qdrant Cloud**:
@@ -35,7 +35,7 @@ The **Write Path** is the document ingestion engine. Its job is to take an unstr
 | :--- | :--- | :--- |
 | **Relational DB** | PostgreSQL (Supabase) + SQLAlchemy | Track chat sessions, document records, and message history with cascading deletes. |
 | **PDF Parser** | PyMuPDF (`fitz`) | Fast native text and embedded image extraction. |
-| **OCR & Captioning** | Gemini Vision API | Fallback for scanned pages & generating descriptive text for charts/diagrams. |
+| **OCR & Captioning** | Gemini (`gemini-3.1-flash-lite`) | Native vision fallback for scanned pages & generating descriptive text for charts/diagrams. |
 | **Image CDN** | Cloudinary | Hosts extracted images so they can be rendered in the frontend chat bubbles via CDN URLs. |
 | **Embeddings** | Gemini Embedding 2 (3072d) | Turns text/captions into mathematical vector representations. |
 | **Vector DB** | Qdrant Cloud | Indexes and executes 3072-dimensional semantic vector queries with metadata filtering. |
